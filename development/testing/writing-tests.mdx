@@ -1,0 +1,415 @@
+---
+title: Writing Tests
+description: Guidelines and examples for writing tests in Invoice OCR
+---
+
+This guide shows how to write effective tests for Invoice OCR using real examples from the codebase.
+
+## Test Structure
+
+Tests are organized in `lib/__tests__/` with the naming pattern `*.test.ts`.
+
+### Basic Test Template
+
+```typescript
+import { describe, it, expect } from 'vitest'
+import { functionToTest } from '../module'
+
+describe('Feature Name', () => {
+  describe('specific behavior', () => {
+    it('should do something specific', () => {
+      const result = functionToTest(input)
+      expect(result).toBe(expectedValue)
+    })
+  })
+})
+```
+
+## Testing Utilities
+
+### Standards Compliance Tests
+
+Test normalization functions for Indian GST standards:
+
+```typescript title="lib/__tests__/standards.test.ts:10-21"
+describe('normalizeGstRate', () => {
+  describe('basic number inputs', () => {
+    it('returns 0 for 0 input', () => {
+      expect(normalizeGstRate(0)).toBe(0)
+    })
+
+    it('snaps to nearest slab for common GST rates', () => {
+      expect(normalizeGstRate(5)).toBe(5)
+      expect(normalizeGstRate(12)).toBe(12)
+      expect(normalizeGstRate(18)).toBe(18)
+      expect(normalizeGstRate(28)).toBe(28)
+    })
+  })
+})
+```
+
+### String Input Handling
+
+Test parsing of various string formats:
+
+```typescript title="lib/__tests__/standards.test.ts:59-85"
+describe('string inputs', () => {
+  it('parses "18%" string', () => {
+    expect(normalizeGstRate('18%')).toBe(18)
+  })
+
+  it('parses "5%" string', () => {
+    expect(normalizeGstRate('5%')).toBe(5)
+  })
+
+  it('parses "12.00" string', () => {
+    expect(normalizeGstRate('12.00')).toBe(12)
+  })
+
+  it('removes commas from input (18,00 becomes 1800, clamped to 100)', () => {
+    // Note: commas are stripped, so '18,00' becomes '1800' which clamps to 100
+    expect(normalizeGstRate('18,00')).toBe(100)
+  })
+
+  it('handles string with spaces', () => {
+    expect(normalizeGstRate(' 18 %')).toBe(18)
+  })
+})
+```
+
+### Edge Case Testing
+
+Always test null, undefined, and boundary values:
+
+```typescript title="lib/__tests__/standards.test.ts:121-148"
+describe('edge cases', () => {
+  it('returns 0 for null', () => {
+    expect(normalizeGstRate(null)).toBe(0)
+  })
+
+  it('returns 0 for undefined', () => {
+    expect(normalizeGstRate(undefined)).toBe(0)
+  })
+
+  it('returns 0 for empty string', () => {
+    expect(normalizeGstRate('')).toBe(0)
+  })
+
+  it('returns 0 for NaN', () => {
+    expect(normalizeGstRate(NaN)).toBe(0)
+  })
+
+  it('returns 0 for Infinity', () => {
+    expect(normalizeGstRate(Infinity)).toBe(0)
+  })
+
+  it('clamps values above 100 to 100', () => {
+    expect(normalizeGstRate(150)).toBe(100)
+  })
+})
+```
+
+## Testing Business Logic
+
+### Helper Function Tests
+
+Test internal utilities using exported test helpers:
+
+```typescript title="lib/__tests__/invoice_v4.test.ts:1-67"
+import { describe, it, expect } from 'vitest'
+import { reconcileV4, V4Doc, V4Item, _testHelpers } from '../invoice_v4'
+
+const { n, r2, effectiveDiscountPct, clone } = _testHelpers
+
+describe('Helper Functions', () => {
+  describe('n() - number parser', () => {
+    it('returns number for valid number input', () => {
+      expect(n(123)).toBe(123)
+      expect(n(45.67)).toBe(45.67)
+      expect(n(0)).toBe(0)
+    })
+
+    it('handles comma as thousand separator', () => {
+      expect(n('1,234')).toBe(1234)
+      expect(n('1,234.56')).toBe(1234.56)
+    })
+
+    it('extracts number from mixed content', () => {
+      expect(n('Rs. 123.45')).toBe(123.45)
+      expect(n('$100')).toBe(100)
+    })
+
+    it('returns custom default when specified', () => {
+      expect(n(null, 5)).toBe(5)
+      expect(n('', 10)).toBe(10)
+    })
+  })
+})
+```
+
+### Test Fixtures
+
+Create reusable test data builders:
+
+```typescript title="lib/__tests__/invoice_v4.test.ts:147-211"
+function createBaseDoc(overrides: Partial<V4Doc> = {}): V4Doc {
+  return {
+    doc_level: {
+      supplier_name: 'Test Supplier',
+      supplier_gstin: '27AABCU9603R1ZM', // Maharashtra
+      invoice_number: 'INV-001',
+      invoice_date: '2024-01-15',
+      place_of_supply_state_code: '27', // Maharashtra (intra-state)
+      buyer_gstin: '27BBBCU1234R1ZN',
+      currency: 'INR',
+    },
+    items: [],
+    header_discounts: [],
+    charges: [],
+    tcs: { rate: 0, amount: 0, base_used: '' },
+    round_off: 0,
+    totals: {
+      items_ex_tax: 0,
+      header_discounts_ex_tax: 0,
+      charges_ex_tax: 0,
+      taxable_ex_tax: 0,
+      gst_total: 0,
+      grand_total: 0,
+    },
+    printed: {
+      taxable_subtotal: null,
+      gst_total: null,
+      hsn_tax_table: [],
+      grand_total: null,
+    },
+    reconciliation: { error_absolute: 0, alternates_considered: [], warnings: [] },
+    meta: { pages_processed: 1, language: 'en', overall_confidence: 0.9 },
+    ...overrides,
+  }
+}
+
+function createBaseItem(overrides: Partial<V4Item> = {}): V4Item {
+  return {
+    name: 'Test Item',
+    hsn: '12345678',
+    qty: 1,
+    uom: 'NOS',
+    rate_ex_tax: 100,
+    discount: {
+      d1_pct: null,
+      d2_pct: null,
+      flat_per_unit: null,
+      effective_pct: 0,
+      amount: 0,
+    },
+    gst: {
+      rate: 18,
+      cgst: 0,
+      sgst: 0,
+      igst: 0,
+      amount: 0,
+    },
+    totals: {
+      line_ex_tax: 0,
+      line_inc_tax: 0,
+    },
+    confidence: 0.9,
+    ...overrides,
+  }
+}
+```
+
+### Integration Tests
+
+Test complete workflows with realistic scenarios:
+
+```typescript title="lib/__tests__/invoice_v4.test.ts:667-688"
+describe('Full Reconciliation Scenarios', () => {
+  describe('simple invoice', () => {
+    it('reconciles basic invoice with single item', () => {
+      const doc = createBaseDoc({
+        items: [
+          createBaseItem({
+            name: 'Widget',
+            rate_ex_tax: 500,
+            qty: 2,
+            gst: { rate: 18, cgst: 0, sgst: 0, igst: 0, amount: 0 },
+          }),
+        ],
+        printed: { taxable_subtotal: 1000, gst_total: 180, hsn_tax_table: [], grand_total: 1180 },
+      })
+
+      const result = reconcileV4(doc)
+
+      expect(result.totals.items_ex_tax).toBe(1000)
+      expect(result.totals.gst_total).toBe(180)
+      expect(result.totals.grand_total).toBe(1180)
+      expect(result.reconciliation.error_absolute).toBe(0)
+    })
+  })
+})
+```
+
+## Testing Calculations
+
+### Discount Cascading
+
+Test complex discount logic:
+
+```typescript title="lib/__tests__/invoice_v4.test.ts:271-289"
+it('applies cascading percentage discounts (d1 + d2)', () => {
+  const doc = createBaseDoc({
+    items: [
+      createBaseItem({
+        rate_ex_tax: 100,
+        qty: 1,
+        gst: { rate: 18, cgst: 0, sgst: 0, igst: 0, amount: 0 },
+        discount: { d1_pct: 10, d2_pct: 10, flat_per_unit: null, effective_pct: 0, amount: 0 },
+      }),
+    ],
+    printed: { taxable_subtotal: null, gst_total: null, hsn_tax_table: [], grand_total: 95.58 },
+  })
+
+  const result = reconcileV4(doc)
+
+  // 100 * 0.9 * 0.9 = 81
+  expect(result.items[0].totals.line_ex_tax).toBe(81)
+  expect(result.items[0].discount.amount).toBe(19)
+})
+```
+
+### GST Splitting
+
+Test intra-state vs inter-state tax logic:
+
+```typescript title="lib/__tests__/invoice_v4.test.ts:391-434"
+describe('CGST/SGST vs IGST split', () => {
+  it('splits to CGST/SGST for intra-state transaction', () => {
+    const doc = createBaseDoc({
+      doc_level: {
+        supplier_name: 'Test Supplier',
+        supplier_gstin: '27AABCU9603R1ZM', // Maharashtra
+        invoice_number: 'INV-001',
+        invoice_date: '2024-01-15',
+        place_of_supply_state_code: '27', // Maharashtra
+        buyer_gstin: '27BBBCU1234R1ZN',
+        currency: 'INR',
+      },
+      items: [createBaseItem({ rate_ex_tax: 100, qty: 1, gst: { rate: 18, cgst: 0, sgst: 0, igst: 0, amount: 0 } })],
+      printed: { taxable_subtotal: null, gst_total: null, hsn_tax_table: [], grand_total: 118 },
+    })
+
+    const result = reconcileV4(doc)
+
+    expect(result.items[0].gst.cgst).toBe(9)
+    expect(result.items[0].gst.sgst).toBe(9)
+    expect(result.items[0].gst.igst).toBe(0)
+  })
+
+  it('uses IGST for inter-state transaction', () => {
+    const doc = createBaseDoc({
+      doc_level: {
+        supplier_name: 'Test Supplier',
+        supplier_gstin: '27AABCU9603R1ZM', // Maharashtra
+        invoice_number: 'INV-001',
+        invoice_date: '2024-01-15',
+        place_of_supply_state_code: '29', // Karnataka (different state)
+        buyer_gstin: '29BBBCU1234R1ZN',
+        currency: 'INR',
+      },
+      items: [createBaseItem({ rate_ex_tax: 100, qty: 1, gst: { rate: 18, cgst: 0, sgst: 0, igst: 0, amount: 0 } })],
+      printed: { taxable_subtotal: null, gst_total: null, hsn_tax_table: [], grand_total: 118 },
+    })
+
+    const result = reconcileV4(doc)
+
+    expect(result.items[0].gst.cgst).toBe(0)
+    expect(result.items[0].gst.sgst).toBe(0)
+    expect(result.items[0].gst.igst).toBe(18)
+  })
+})
+```
+
+## Best Practices
+
+### Descriptive Test Names
+
+Test names should describe behavior, not implementation:
+
+```typescript
+// Good
+it('snaps 17.5 to 18 (within tolerance)', () => {})
+it('returns 0 for null input', () => {})
+it('applies cascading percentage discounts', () => {})
+
+// Avoid
+it('test1', () => {})
+it('works', () => {})
+it('GST function', () => {})
+```
+
+### Arrange-Act-Assert Pattern
+
+Structure tests clearly:
+
+```typescript
+it('should calculate total with discount', () => {
+  // Arrange: Set up test data
+  const doc = createBaseDoc({
+    items: [createBaseItem({ rate_ex_tax: 100, qty: 2 })],
+  })
+
+  // Act: Execute the function
+  const result = reconcileV4(doc)
+
+  // Assert: Verify the result
+  expect(result.totals.items_ex_tax).toBe(200)
+})
+```
+
+### Floating Point Comparisons
+
+Use `toBeCloseTo` for decimal precision:
+
+```typescript title="lib/__tests__/invoice_v4.test.ts:116"
+it('handles larger cascading discounts', () => {
+  // d1=20%, d2=10%: effective = 20 + 10 - (20*10/100) = 28%
+  expect(effectiveDiscountPct(20, 10)).toBeCloseTo(28, 10)
+})
+```
+
+### Group Related Tests
+
+Use nested `describe` blocks for organization:
+
+```typescript
+describe('normalizeGstRate', () => {
+  describe('basic number inputs', () => {
+    // Tests for numbers
+  })
+
+  describe('string inputs', () => {
+    // Tests for strings
+  })
+
+  describe('edge cases', () => {
+    // Tests for edge cases
+  })
+})
+```
+
+## Testing Checklist
+
+When writing tests, ensure you cover:
+
+- [ ] Happy path (typical valid inputs)
+- [ ] Edge cases (null, undefined, empty, zero)
+- [ ] Boundary values (min, max, near limits)
+- [ ] Invalid inputs (wrong types, malformed data)
+- [ ] Error conditions (exceptions, failures)
+- [ ] Real-world scenarios (from actual invoices)
+
+## Related
+
+- [Testing Overview](/development/testing/overview) - Strategy and setup
+- [Running Tests](/development/testing/running-tests) - Commands and workflows

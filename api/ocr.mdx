@@ -1,0 +1,232 @@
+---
+title: POST /api/ocr
+description: Extract raw text from invoice images or PDFs
+---
+
+The `/api/ocr` endpoint extracts plain text from invoice images or PDFs without structuring. Use this for debugging, testing model vision capabilities, or when you only need raw text.
+
+## Endpoint
+
+```
+POST /api/ocr
+```
+
+## Request Body
+
+<ParamField path="imageBase64" type="string">
+  Base64-encoded image data or data URL. Required if `pdfUrl` and `pdfBase64` are not provided.
+  
+  Formats:
+  - Bare base64: `iVBORw0KGgoAAAANS...`
+  - Data URL: `data:image/png;base64,iVBORw0KGgo...`
+</ParamField>
+
+<ParamField path="mimeType" type="string" default="image/png">
+  MIME type of the image (e.g., `image/png`, `image/jpeg`, `image/webp`). Only used if `imageBase64` is bare base64.
+</ParamField>
+
+<ParamField path="pdfUrl" type="string">
+  Publicly accessible URL to a PDF document. Required if `imageBase64` and `pdfBase64` are not provided.
+</ParamField>
+
+<ParamField path="pdfBase64" type="string">
+  Base64-encoded PDF data or data URL. Required if `imageBase64` and `pdfUrl` are not provided.
+  
+  Formats:
+  - Bare base64: `JVBERi0xLjQKJeLjz9...`
+  - Data URL: `data:application/pdf;base64,JVBERi0xLjQK...`
+</ParamField>
+
+<ParamField path="filename" type="string" default="document.pdf">
+  Optional filename for PDF documents (used in OpenRouter request)
+</ParamField>
+
+<ParamField path="model" type="string">
+  Override the default model. Examples: `openai/gpt-4o`, `google/gemini-2.0-flash`, `anthropic/claude-3.5-sonnet`
+</ParamField>
+
+<ParamField path="plugins" type="array">
+  Override PDF parsing plugins. Advanced use only.
+  
+  Default:
+  ```json
+  [
+    {
+      "id": "file-parser",
+      "pdf": { "engine": "pdf-text" }
+    }
+  ]
+  ```
+</ParamField>
+
+<ParamField path="annotations" type="object">
+  Pass-through OpenRouter annotations to avoid re-parsing costs on subsequent requests
+</ParamField>
+
+## Response
+
+<ResponseField name="text" type="string">
+  Extracted raw text from the document, preserving line breaks
+</ResponseField>
+
+### Error Response
+
+<ResponseField name="error" type="string">
+  Error message describing what went wrong
+</ResponseField>
+
+## Example Requests
+
+<CodeGroup>
+
+```bash Image Upload
+curl -X POST https://your-domain.com/api/ocr \
+  -H "Content-Type: application/json" \
+  -d '{
+    "imageBase64": "data:image/png;base64,iVBORw0KGgoAAAANS...",
+    "model": "openai/gpt-4o-mini"
+  }'
+```
+
+```bash PDF URL
+curl -X POST https://your-domain.com/api/ocr \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pdfUrl": "https://example.com/invoice.pdf",
+    "filename": "invoice.pdf"
+  }'
+```
+
+```bash PDF Base64
+curl -X POST https://your-domain.com/api/ocr \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pdfBase64": "JVBERi0xLjQKJeLjz9MNCi...",
+    "filename": "invoice.pdf",
+    "model": "google/gemini-2.0-flash"
+  }'
+```
+
+```javascript JavaScript/TypeScript
+const response = await fetch('/api/ocr', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    imageBase64: 'data:image/png;base64,iVBORw0KGgo...',
+    model: 'openai/gpt-4o-mini'
+  })
+});
+
+const { text } = await response.json();
+console.log('Extracted text:', text);
+```
+
+```python Python
+import requests
+import base64
+
+with open('invoice.png', 'rb') as f:
+    image_data = base64.b64encode(f.read()).decode()
+
+response = requests.post(
+    'https://your-domain.com/api/ocr',
+    json={
+        'imageBase64': f'data:image/png;base64,{image_data}',
+        'model': 'openai/gpt-4o-mini'
+    }
+)
+
+result = response.json()
+print('Extracted text:', result['text'])
+```
+
+</CodeGroup>
+
+## Example Response
+
+```json Success (200)
+{
+  "text": "TAX INVOICE\n\nInvoice No: INV-2024-001\nDate: 15-01-2024\n\nBill To:\nAcme Corporation\n123 Business Street\nMumbai, Maharashtra 400001\nGSTIN: 27AABCU9603R1ZM\n\nItems:\n1. Premium Widget - Qty: 10 - Rate: ₹1,000 - Amount: ₹10,000\n   HSN: 8517 - GST 18% (CGST 9% + SGST 9%)\n\nSubtotal: ₹10,000\nCGST (9%): ₹900\nSGST (9%): ₹900\nTotal: ₹11,800"
+}
+```
+
+```json Error (400)
+{
+  "error": "Provide 'imageBase64' or 'pdfUrl' or 'pdfBase64'"
+}
+```
+
+```json Error (500)
+{
+  "error": "OpenRouter error: 401 Invalid API key"
+}
+```
+
+## Implementation Details
+
+### System Prompt
+
+The endpoint uses this system prompt to guide text extraction:
+
+```
+You are an OCR extractor. Return only the raw, verbatim text from the image. 
+Preserve line breaks. Do not add commentary or extra labels.
+```
+
+### PDF Processing
+
+For PDFs, the endpoint:
+
+1. Configures the `file-parser` plugin with the specified engine
+2. Sends the PDF to OpenRouter with multi-page support
+3. Extracts text across all pages
+
+The `OPENROUTER_PDF_ENGINE` environment variable controls the parsing engine:
+
+- `pdf-text` (default) - Fast, text-layer extraction
+- `mistral-ocr` - OCR-based, better for scanned PDFs
+- `native` - Model's native PDF support
+
+### Model Parameters
+
+- `temperature: 0` - Deterministic output
+- `response_format` - Not enforced (plain text response)
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Debugging" icon="bug">
+    Verify what the model sees before attempting structured extraction
+  </Card>
+  <Card title="Format Testing" icon="vial">
+    Test if your invoice format is readable by vision models
+  </Card>
+  <Card title="Search Indexing" icon="magnifying-glass">
+    Extract text for full-text search or keyword indexing
+  </Card>
+  <Card title="Custom Parsing" icon="code">
+    Get raw text and apply your own parsing logic
+  </Card>
+</CardGroup>
+
+## Limitations
+
+<Warning>
+  This endpoint returns unstructured text. For structured invoice data, use `/api/ocr-structured` or `/api/ocr-structured-v4`.
+</Warning>
+
+- No schema validation or data structuring
+- No reconciliation or calculation verification
+- Line breaks and formatting depend on model interpretation
+- Multi-column layouts may not preserve column order
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Structured Extraction" icon="table" href="/api/ocr-structured">
+    Extract structured JSON with MyBillBook schema
+  </Card>
+  <Card title="V4 Schema" icon="layer-group" href="/api/ocr-structured-v4">
+    Advanced India GST extraction with reconciliation
+  </Card>
+</CardGroup>

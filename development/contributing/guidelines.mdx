@@ -1,0 +1,131 @@
+---
+title: 'Contributing Guidelines'
+description: 'How to contribute to Invoice OCR, PR process, and issue reporting'
+---
+
+## How to Contribute
+
+We welcome contributions to Invoice OCR! Whether you're fixing bugs, adding features, or improving documentation, your help is appreciated.
+
+### Getting Started
+
+1. **Fork the repository** and clone it locally
+2. **Set up your environment**:
+   ```bash
+   cp .env.example .env.local
+   # Edit .env.local with your OpenRouter API key
+   npm install
+   npm run dev
+   ```
+3. **Create a branch** for your changes
+4. **Make your changes** following our [code style guidelines](/development/contributing/code-style)
+5. **Test your changes** thoroughly
+6. **Submit a pull request**
+
+## Pull Request Process
+
+### Before Submitting
+
+- Run linting: `npm run lint`
+- Fix all lint errors before committing
+- Run tests: `npm test` or `npm run test:run`
+- Ensure all tests pass
+- Test your changes locally with `npm run dev`
+
+### PR Requirements
+
+Your pull request should include:
+
+1. **Clear purpose and scope**
+   - Describe what your PR does and why
+   - Link to related issues (e.g., "Fixes #123")
+
+2. **Screenshots or GIFs** for UI changes
+   - Before/after comparisons help reviewers understand visual changes
+   - Use tools like [Kap](https://getkap.co/) or [ScreenToGif](https://www.screentogif.com/)
+
+3. **Local test steps**
+   - Provide steps to test your changes
+   - Include sample data or test cases if applicable
+
+4. **Environment variable changes**
+   - Document any new or modified env vars
+   - Update `.env.example` if needed
+
+### Example PR Description
+
+```markdown
+## Summary
+Adds support for processing multi-page PDFs with the Mistral OCR engine.
+
+## Changes
+- Added `OPENROUTER_PDF_ENGINE` configuration option
+- Updated `/api/ocr-structured-v4` to accept `plugins` parameter
+- Added fallback logic for PDF parsing failures
+
+## Testing
+1. Set `OPENROUTER_PDF_ENGINE=mistral-ocr` in `.env.local`
+2. Upload a multi-page PDF invoice
+3. Verify all pages are processed correctly
+
+Fixes #45
+```
+
+## Issue Reporting
+
+### Bug Reports
+
+When reporting bugs, please include:
+
+- **Clear description** of the issue
+- **Steps to reproduce** the problem
+- **Expected vs actual behavior**
+- **Environment details**:
+  - Node.js version
+  - npm version
+  - Operating system
+  - Browser (if UI-related)
+- **Error messages** or screenshots
+- **Sample data** (if applicable, ensure no sensitive information)
+
+### Feature Requests
+
+For feature requests, describe:
+
+- **Use case**: What problem does this solve?
+- **Proposed solution**: How should it work?
+- **Alternatives considered**: Other approaches you've thought about
+- **Additional context**: Screenshots, mockups, or examples
+
+## Code Review Process
+
+1. **Automated checks** run on every PR (linting, tests)
+2. **Maintainer review** for code quality and design
+3. **Discussion and iteration** if changes are needed
+4. **Merge** once approved and all checks pass
+
+## Security
+
+### Reporting Security Issues
+
+Do not open public issues for security vulnerabilities. Instead, contact the maintainers directly.
+
+### Security Best Practices
+
+- **Never commit secrets**: Use `.env.local` (gitignored)
+- **Keep API keys server-side only**: No client-side exposure
+- **Validate inputs**: All user inputs should be sanitized
+- **Review dependencies**: Keep packages up to date
+
+## Getting Help
+
+If you need help contributing:
+
+- Check the [development documentation](/development/overview)
+- Review existing issues and PRs for examples
+- Ask questions in issue discussions
+- Reach out to maintainers for guidance
+
+## Recognition
+
+All contributors are recognized in the project's commit history. Significant contributions may be highlighted in release notes.

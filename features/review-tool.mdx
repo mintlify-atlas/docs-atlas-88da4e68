@@ -1,0 +1,606 @@
+---
+title: 'Review Tool'
+description: 'Debug OCR responses with the LangFuse review interface at /review'
+icon: 'microscope'
+---
+
+## Overview
+
+The Review Tool (`/review`) is a web-based debugging interface for inspecting OCR responses, validating reconciliation, and understanding why the engine made specific decisions.
+
+<Note>
+  Access the tool at: `http://localhost:3000/review` (or your deployed URL + `/review`)
+</Note>
+
+---
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Auto-Detection" icon="magnifying-glass">
+    Automatically finds invoice objects in nested JSON (LangFuse traces, API responses)
+  </Card>
+  <Card title="Visual Breakdown" icon="table">
+    Line-by-line math display: qty × rate, discounts, taxes, totals
+  </Card>
+  <Card title="Error Highlighting" icon="triangle-exclamation">
+    Color-coded reconciliation status (green = matched, red = error)
+  </Card>
+  <Card title="Hypothesis Tracing" icon="code-branch">
+    Shows all alternates considered and why one was chosen
+  </Card>
+</CardGroup>
+
+---
+
+## Quick Start
+
+<Steps>
+  <Step title="Navigate to /review">
+    Open your browser and go to:
+    ```
+    http://localhost:3000/review
+    ```
+  </Step>
+  
+  <Step title="Paste JSON Payload">
+    Copy the full API response or LangFuse trace and paste into the text area:
+    
+    <Tabs>
+      <Tab title="From API">
+        ```json
+        {
+          "doc_level": { ... },
+          "items": [ ... ],
+          "totals": { ... },
+          "reconciliation": { ... }
+        }
+        ```
+      </Tab>
+      <Tab title="From LangFuse">
+        ```json
+        [
+          {
+            "headers": { ... },
+            "response": [
+              {
+                "response": {
+                  "voucher": { ... },
+                  "items": [ ... ]
+                }
+              }
+            ]
+          },
+          200
+        ]
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+  
+  <Step title="Click Preview">
+    The tool will:
+    1. Search through the JSON tree
+    2. Detect invoice schema (compact or V4)
+    3. Display the invoice with reconciliation details
+  </Step>
+</Steps>
+
+---
+
+## Interface Components
+
+### 1. JSON Input Area
+
+<Frame>
+  ![JSON Input](/images/review-tool-input.png)
+</Frame>
+
+**Features**:
+- Accepts any JSON structure (no need to clean/format)
+- Auto-detects invoice objects at any depth
+- Supports both compact and V4 schemas
+- Load Sample button for quick testing
+
+<Tip>
+  You can paste entire LangFuse traces. The tool will recursively search for invoice-like objects.
+</Tip>
+
+---
+
+### 2. Detection Status
+
+After clicking Preview, the tool shows:
+
+```
+✅ Detected MyBillBook v4 schema
+Path: $.response[0].response
+```
+
+**Possible schemas**:
+- **Compact (myBillBook)**: Legacy structured schema (`voucher`, `items`, `party`)
+- **MyBillBook v4**: Full V4 schema (`doc_level`, `items`, `totals`, `reconciliation`)
+- **voucher_info**: V4 variant with `voucher_info` instead of `doc_level` (auto-normalized)
+
+---
+
+### 3. Invoice Viewer
+
+Displays the structured invoice data with expandable sections:
+
+<Tabs>
+  <Tab title="Compact Schema">
+    <Frame>
+      ![Compact Viewer](/images/invoice-viewer-compact.png)
+    </Frame>
+    
+    Shows:
+    - Voucher details (invoice number, date, totals)
+    - Party information (name, GSTIN, address)
+    - Item lines with computed totals
+    - Reconciliation status
+  </Tab>
+  
+  <Tab title="V4 Schema">
+    <Frame>
+      ![V4 Viewer](/images/invoice-viewer-v4.png)
+    </Frame>
+    
+    Shows:
+    - Document-level metadata
+    - Normalized items with GST breakdown
+    - Header discounts (sequential)
+    - Charges with taxable flags
+    - TCS and round-off
+    - Printed anchors (HSN table, subtotals)
+    - Reconciliation metadata
+  </Tab>
+</Tabs>
+
+---
+
+### 4. Reconciliation Breakdown
+
+#### For Compact Schema
+
+Shows line-level math table:
+
+<Frame>
+  ![Compact Breakdown](/images/compact-breakdown.png)
+</Frame>
+
+<table>
+  <thead>
+    <tr>
+      <th>Column</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>**No**</td>
+      <td>Line number</td>
+    </tr>
+    <tr>
+      <td>**Item**</td>
+      <td>Item name</td>
+    </tr>
+    <tr>
+      <td>**Qty**</td>
+      <td>Quantity</td>
+    </tr>
+    <tr>
+      <td>**Rate ex-tax**</td>
+      <td>Per-unit price (tax-exclusive)</td>
+    </tr>
+    <tr>
+      <td>**Base ex-tax**</td>
+      <td>`Qty × Rate` before discounts</td>
+    </tr>
+    <tr>
+      <td>**Item discount ₹**</td>
+      <td>Line-level discount amount</td>
+    </tr>
+    <tr>
+      <td>**Invoice discount ₹**</td>
+      <td>Voucher-level discount allocated to this line</td>
+    </tr>
+    <tr>
+      <td>**Taxable ex-tax**</td>
+      <td>Final taxable amount after all discounts</td>
+    </tr>
+    <tr>
+      <td>**Tax %**</td>
+      <td>GST rate</td>
+    </tr>
+    <tr>
+      <td>**Tax ₹**</td>
+      <td>GST amount (`Taxable × Tax%`)</td>
+    </tr>
+    <tr>
+      <td>**Line total ₹**</td>
+      <td>Final line amount (`Taxable + Tax`)</td>
+    </tr>
+  </tbody>
+</table>
+
+**Color Coding**:
+- 🟢 Green footer: Items taxable, tax, and total
+- 🟡 Yellow metadata: Voucher discount applied, round-off used, discount mode
+
+#### For V4 Schema
+
+Shows detailed reconciliation results:
+
+<Frame>
+  ![V4 Reconciliation](/images/v4-reconciliation.png)
+</Frame>
+
+**Sections**:
+
+<Accordion title="Totals Summary">
+  ```json
+  {
+    "items_ex_tax": 50000.00,
+    "header_discounts_ex_tax": 5000.00,
+    "charges_ex_tax": 500.00,
+    "taxable_ex_tax": 45500.00,
+    "gst_total": 8190.00,
+    "grand_total": 53690.00
+  }
+  ```
+</Accordion>
+
+<Accordion title="Printed Anchors">
+  ```json
+  {
+    "taxable_subtotal": 45500.00,
+    "gst_total": 8190.00,
+    "hsn_tax_table": [
+      {
+        "hsn": "8471",
+        "taxable_value": 45500.00,
+        "cgst_rate": 9,
+        "sgst_rate": 9
+      }
+    ],
+    "grand_total": 53690.00
+  }
+  ```
+</Accordion>
+
+<Accordion title="Reconciliation Metadata">
+  ```json
+  {
+    "error_absolute": 0.00,
+    "alternates_considered": [
+      "as_is:err=0.00,implied_round=0.00,score=0.00",
+      "from_printed_with_tax:err=125.50,implied_round=125.50,score=251.00"
+    ],
+    "warnings": []
+  }
+  ```
+  
+  **Status**:
+  - ✅ **Matched** (error ≤ ₹0.05): Green background
+  - ⚠️ **Close** (error ≤ ₹1.00): Yellow background
+  - ❌ **Unmatched** (error > ₹1.00): Red background
+</Accordion>
+
+---
+
+## Use Cases
+
+### 1. Debug Extraction Failures
+
+<Steps>
+  <Step title="Paste API Response">
+    Copy the full response from `/api/ocr-structured-v4`:
+    ```json
+    {
+      "doc_level": { ... },
+      "items": [ ... ],
+      "reconciliation": {
+        "error_absolute": 510.00,
+        "warnings": []
+      }
+    }
+    ```
+  </Step>
+  
+  <Step title="Check Alternates Considered">
+    Look at the `alternates_considered` array:
+    ```json
+    [
+      "as_is:err=510.00,implied_round=510.00,score=1020.00",
+      "from_printed_with_tax:err=125.50,implied_round=125.50,score=251.00",
+      "from_printed_without_tax:err=510.00,implied_round=510.00,score=1020.00"
+    ]
+    ```
+    
+    **Analysis**: `from_printed_with_tax` had much lower error (125.50 vs. 510.00) but still didn't match.
+  </Step>
+  
+  <Step title="Inspect Items">
+    Check if items were extracted correctly:
+    ```json
+    {
+      "items": [
+        { "name": "Laptop", "qty": 2, "rate_ex_tax": 45000 }
+        // Missing items?
+      ]
+    }
+    ```
+    
+    If items are missing → multi-page PDF issue or OCR failure.
+  </Step>
+  
+  <Step title="Review HSN Table">
+    ```json
+    {
+      "printed": {
+        "hsn_tax_table": [] // Empty!
+      }
+    }
+    ```
+    
+    If empty and invoice has HSN table → PDF engine issue or table not on processed pages.
+  </Step>
+</Steps>
+
+---
+
+### 2. Understand Reconciliation Logic
+
+**Scenario**: Why did the engine pick `from_printed_without_tax` instead of `as_is`?
+
+<Steps>
+  <Step title="Compare Errors">
+    ```json
+    "alternates_considered": [
+      "as_is:err=5.50,implied_round=5.50,score=11.00",
+      "from_printed_without_tax:err=0.50,implied_round=0.50,score=1.00"
+    ]
+    ```
+    
+    **Analysis**: `from_printed_without_tax` has much lower score (1.00 vs. 11.00).
+  </Step>
+  
+  <Step title="Check Implied Round-Off">
+    Both have reasonable round-offs (< ₹6), so the decision was purely based on error.
+  </Step>
+  
+  <Step title="Conclusion">
+    The model likely extracted `rate_ex_tax` incorrectly in the initial parse (maybe included GST in rate). The `from_printed_without_tax` hypothesis corrected this by using printed rate directly.
+  </Step>
+</Steps>
+
+---
+
+### 3. Validate Discount Allocation
+
+**Scenario**: Multi-discount invoice with complex header discounts.
+
+<Steps>
+  <Step title="Check Header Discounts">
+    ```json
+    {
+      "header_discounts": [
+        { "label": "Trade Discount", "type": "PERCENT", "value": 10, "order": 1 },
+        { "label": "Special Discount", "type": "PERCENT", "value": 5, "order": 2 },
+        { "label": "Festival Offer", "type": "ABSOLUTE", "value": 1000, "order": 3 }
+      ]
+    }
+    ```
+  </Step>
+  
+  <Step title="Verify Sequential Application">
+    ```json
+    {
+      "totals": {
+        "items_ex_tax": 50000.00,
+        "header_discounts_ex_tax": 7250.00, // = 10% + 5% + ₹1000
+        "taxable_ex_tax": 42750.00
+      }
+    }
+    ```
+    
+    **Math**:
+    1. After 10%: `50000 × 0.9 = 45000`
+    2. After 5%: `45000 × 0.95 = 42750`
+    3. After ₹1000: `42750 - 1000 = 41750`
+    
+    Wait, totals show `taxable_ex_tax = 42750`, but calculation gives `41750`. Why?
+  </Step>
+  
+  <Step title="Check Printed Anchors">
+    ```json
+    {
+      "printed": {
+        "taxable_subtotal": 42750.00,
+        "gst_total": 7695.00
+      }
+    }
+    ```
+    
+    **Analysis**: Printed subtotal is 42750, not 41750. The reconciliation engine used **smart allocation** to match the printed GST total, which resulted in not applying the full ₹1000 absolute discount.
+  </Step>
+</Steps>
+
+---
+
+### 4. Compare LangFuse Traces
+
+**Use Case**: You ran the same invoice through two different models. Which extracted better?
+
+<Steps>
+  <Step title="Paste Trace 1 (GPT-4o-mini)">
+    ```
+    Detected V4 schema
+    Error: ₹5.50
+    Confidence: 0.88
+    ```
+  </Step>
+  
+  <Step title="Paste Trace 2 (Gemini 2.0 Flash)">
+    ```
+    Detected V4 schema
+    Error: ₹0.00
+    Confidence: 0.95
+    ```
+  </Step>
+  
+  <Step title="Compare Items">
+    | Field | GPT-4o-mini | Gemini 2.0 Flash |
+    |-------|-------------|------------------|
+    | Items count | 3 | 3 |
+    | HSN table detected | ❌ | ✅ |
+    | Header discounts | 1 | 2 |
+    | Charges | 0 | 1 (Freight) |
+    
+    **Winner**: Gemini 2.0 Flash extracted more complete data.
+  </Step>
+</Steps>
+
+---
+
+## Sample Payloads
+
+The Review Tool includes a "Load Sample" button that populates a demo invoice:
+
+```json
+[
+  {
+    "headers": { ... },
+    "_status": "200 OK",
+    "response": [
+      {
+        "response": {
+          "items": [
+            {
+              "discount_rate": 0,
+              "hsn_sac_code": "8523",
+              "name": "Quick Heal-IER 1-Int Essential-1 User",
+              "price": 250,
+              "quantity": 1,
+              "tax_rate": 18,
+              "unit": "NOS"
+            },
+            {
+              "discount_rate": 0,
+              "hsn_sac_code": "84439959",
+              "name": "TONER CARTRIDGE 12 A FRONTECH",
+              "price": 275,
+              "quantity": 1,
+              "tax_rate": 18,
+              "unit": "NOS"
+            }
+          ],
+          "party": {
+            "party_gstin_number": "32ABDFA4059P1ZA",
+            "party_name": "ASTER DISTRIBUTORS"
+          },
+          "voucher": {
+            "additional_charges": [],
+            "invoice_date": "14-10-2025",
+            "invoice_discount": 0,
+            "invoice_number": "AST/1501/B2C25",
+            "round_off": 0.1,
+            "total_invoice_amount": 1245
+          }
+        }
+      }
+    ]
+  },
+  200
+]
+```
+
+This demonstrates:
+- Nested LangFuse trace format
+- Compact schema with 3 items
+- Zero discounts and charges
+- Small round-off (₹0.10)
+
+---
+
+## Tips & Tricks
+
+<AccordionGroup>
+  <Accordion title="Auto-Scroll to Results">
+    After clicking Preview, the page automatically scrolls to the invoice viewer. Adjust scroll position by setting:
+    ```typescript
+    resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    ```
+  </Accordion>
+  
+  <Accordion title="Copy Reconciliation Details">
+    Right-click on the reconciliation card → Inspect → Copy JSON object from React DevTools.
+  </Accordion>
+  
+  <Accordion title="Test with Raw OCR Output">
+    Paste the output from `/api/ocr` (raw text) to see what the model sees before structuring:
+    ```json
+    {
+      "text": "TAX INVOICE\nInvoice No: INV-2024-001\n..."
+    }
+    ```
+    
+    The Review Tool won't detect invoice schema but will display the raw text for inspection.
+  </Accordion>
+  
+  <Accordion title="Compare Before/After Reconciliation">
+    1. Paste the raw model output (before `reconcileV4()`)
+    2. Note the error and alternates
+    3. Manually run reconciliation in browser console:
+       ```typescript
+       import { reconcileV4 } from '@/lib/invoice_v4';
+       const reconciled = reconcileV4(rawDoc);
+       console.log(reconciled);
+       ```
+    4. Compare with API response to verify reconciliation logic
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Development Notes
+
+The Review Tool is implemented in `app/review/page.tsx` using:
+
+- **Auto-detection**: Recursive JSON traversal with schema validation
+  ```typescript
+  function findInvoiceCandidate(value: unknown, path = "$", visited = new WeakSet<object>()): ParseResult | null {
+    if (isV4DocCandidate(value)) {
+      return { kind: "v4", doc: value as V4Doc, path, source: "doc_level" };
+    }
+    // ... recursive search
+  }
+  ```
+
+- **Schema detection**: Type guards for compact vs. V4
+  ```typescript
+  function isInvoiceDocCandidate(value: unknown): value is InvoiceDoc {
+    if (!isRecord(value)) return false;
+    return "voucher" in value && "items" in value && "party" in value;
+  }
+  ```
+
+- **Reconciliation display**: Separate components for compact (`CompactBreakdown`) and V4 (`InvoiceViewerV4`)
+
+<Note>
+  To extend the Review Tool (e.g., add new schema types), update the `findInvoiceCandidate` function and add corresponding viewer components.
+</Note>
+
+---
+
+## Related Topics
+
+<CardGroup cols={2}>
+  <Card title="OCR Modes" icon="layer-group" href="/features/ocr-modes">
+    Understand what each mode returns for paste into Review Tool
+  </Card>
+  <Card title="Reconciliation Engine" icon="calculator" href="/features/reconciliation-engine">
+    Deep dive into the logic behind the alternates and scoring
+  </Card>
+</CardGroup>

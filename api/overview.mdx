@@ -1,0 +1,202 @@
+---
+title: API Overview
+description: Authentication, base concepts, and getting started with Invoice OCR API
+---
+
+The Invoice OCR API provides endpoints to extract text and structured data from invoice images and PDFs using vision-language models via OpenRouter.
+
+## Base URL
+
+All API endpoints are relative to your deployment base URL:
+
+```
+https://your-domain.com/api
+```
+
+For local development:
+
+```
+http://localhost:3000/api
+```
+
+## Authentication
+
+The API uses OpenRouter for model inference. Configure your OpenRouter API key in the environment:
+
+```bash .env.local
+OPENROUTER_API_KEY=your_key_here
+```
+
+The API routes handle authentication with OpenRouter internally - clients do not need to provide API keys in requests.
+
+## Environment Configuration
+
+<ParamField path="OPENROUTER_API_KEY" type="string" required>
+  Your OpenRouter API key (required)
+</ParamField>
+
+<ParamField path="OPENROUTER_MODEL" type="string" default="openai/gpt-4o-mini">
+  Default model for inference. Can be overridden per request.
+</ParamField>
+
+<ParamField path="OPENROUTER_SITE_URL" type="string" default="http://localhost:3000">
+  Your site URL for OpenRouter HTTP-Referer header
+</ParamField>
+
+<ParamField path="OPENROUTER_APP_NAME" type="string" default="Invoice OCR">
+  Application name for OpenRouter X-Title header
+</ParamField>
+
+<ParamField path="OPENROUTER_PDF_ENGINE" type="string" default="pdf-text">
+  PDF parsing engine: `pdf-text`, `mistral-ocr`, or `native`
+</ParamField>
+
+## Endpoints
+
+Three endpoints provide different levels of extraction:
+
+### Raw Text Extraction
+
+<Card title="POST /api/ocr" icon="text" href="/api/ocr">
+  Extract raw text from images or PDFs without structuring
+</Card>
+
+### Structured Extraction (Legacy)
+
+<Card title="POST /api/ocr-structured" icon="table" href="/api/ocr-structured">
+  Extract structured JSON using MyBillBook schema with reconciliation
+</Card>
+
+### Structured Extraction (v4)
+
+<Card title="POST /api/ocr-structured-v4" icon="layer-group" href="/api/ocr-structured-v4">
+  Advanced India GST schema with comprehensive reconciliation
+</Card>
+
+## Input Formats
+
+All endpoints support multiple input formats:
+
+- **Base64 Image**: `imageBase64` parameter with optional `mimeType`
+- **Data URL**: `imageBase64` with `data:image/png;base64,...` format
+- **PDF URL**: `pdfUrl` parameter with publicly accessible URL
+- **Base64 PDF**: `pdfBase64` parameter
+
+## Response Format
+
+All endpoints return JSON responses:
+
+**Success (200)**
+```json
+{
+  // Endpoint-specific response structure
+}
+```
+
+**Error (400/500)**
+```json
+{
+  "error": "Error message describing the issue"
+}
+```
+
+## Model Selection
+
+You can override the default model per request:
+
+```json
+{
+  "imageBase64": "...",
+  "model": "anthropic/claude-3.5-sonnet"
+}
+```
+
+Supported models depend on your OpenRouter plan. Popular choices:
+
+- `openai/gpt-4o-mini` - Fast and cost-effective
+- `openai/gpt-4o` - Higher accuracy
+- `google/gemini-2.0-flash` - Excellent for PDFs
+- `anthropic/claude-3.5-sonnet` - High quality extraction
+
+## Error Handling
+
+Common error scenarios:
+
+<AccordionGroup>
+  <Accordion title="Missing Input (400)">
+    ```json
+    {
+      "error": "Provide 'imageBase64' or 'pdfUrl' or 'pdfBase64'"
+    }
+    ```
+    Include at least one input format in your request.
+  </Accordion>
+
+  <Accordion title="Missing API Key (500)">
+    ```json
+    {
+      "error": "Server missing OPENROUTER_API_KEY"
+    }
+    ```
+    Configure `OPENROUTER_API_KEY` in your environment.
+  </Accordion>
+
+  <Accordion title="OpenRouter Error (500)">
+    ```json
+    {
+      "error": "OpenRouter error: 401 Invalid API key"
+    }
+    ```
+    Check your OpenRouter API key and account status.
+  </Accordion>
+
+  <Accordion title="No Content Returned (500)">
+    ```json
+    {
+      "error": "No content returned from model"
+    }
+    ```
+    The model failed to generate output. Try a different model or input.
+  </Accordion>
+</AccordionGroup>
+
+## Rate Limits
+
+Rate limits are determined by your OpenRouter plan. The API does not impose additional limits.
+
+## Best Practices
+
+<Steps>
+  <Step title="Start with Raw OCR">
+    Test `/api/ocr` first to verify the model can read your invoice format
+  </Step>
+  
+  <Step title="Choose the Right Endpoint">
+    Use `/api/ocr-structured-v4` for India GST invoices, `/api/ocr-structured` for simpler formats
+  </Step>
+  
+  <Step title="Handle Reconciliation">
+    Check `reconciliation.status` in structured responses to detect calculation mismatches
+  </Step>
+  
+  <Step title="Optimize Model Selection">
+    Balance cost and accuracy based on your invoice complexity
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Raw Text Extraction" icon="text" href="/api/ocr">
+    Learn about the `/api/ocr` endpoint
+  </Card>
+  <Card title="Structured Extraction" icon="table" href="/api/ocr-structured">
+    Explore the MyBillBook schema
+  </Card>
+  <Card title="V4 Schema" icon="layer-group" href="/api/ocr-structured-v4">
+    Advanced India GST extraction
+  </Card>
+  <Card title="Integration Guide" icon="code" href="/integration/quickstart">
+    Integrate the API into your app
+  </Card>
+</CardGroup>

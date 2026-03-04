@@ -1,0 +1,191 @@
+---
+title: Uploading Invoices
+description: Learn how to upload invoice images and PDFs to Invoice OCR
+---
+
+## Overview
+
+Invoice OCR supports multiple ways to upload your invoices for processing. The upload interface provides drag-and-drop functionality, file browser selection, and accepts both images and PDF documents.
+
+## Supported File Formats
+
+The system accepts the following file types:
+
+<CardGroup cols={2}>
+  <Card title="Images" icon="image">
+    - PNG (.png)
+    - JPEG (.jpg, .jpeg)
+    - Other standard image formats
+    - Maximum size: 10MB
+  </Card>
+  <Card title="PDFs" icon="file-pdf">
+    - PDF documents (.pdf)
+    - Multi-page PDFs supported
+    - Maximum size: 10MB
+  </Card>
+</CardGroup>
+
+<Note>
+  The system automatically detects whether your upload is an image or PDF and configures the processing pipeline accordingly.
+</Note>
+
+## Upload Methods
+
+### Method 1: Drag and Drop
+
+The fastest way to upload invoices is using drag and drop:
+
+<Steps>
+  <Step title="Locate your invoice file">
+    Open your file browser and locate the invoice image or PDF you want to process.
+  </Step>
+  
+  <Step title="Drag the file">
+    Click and hold the file, then drag it over the upload area in the Invoice OCR interface.
+    
+    The upload area will highlight with a blue border and scale slightly when you hover over it with a file.
+  </Step>
+  
+  <Step title="Drop to upload">
+    Release the mouse button to drop the file. The system will immediately preview your document.
+  </Step>
+</Steps>
+
+<Tip>
+  The upload area displays "Drop your invoice here" when you're dragging a file over it.
+</Tip>
+
+### Method 2: File Browser
+
+Alternatively, you can use the traditional file browser:
+
+<Steps>
+  <Step title="Click Browse Files button">
+    Click the **Browse Files** button in the center of the upload area.
+  </Step>
+  
+  <Step title="Select your file">
+    A file picker dialog will open. Navigate to your invoice file and select it.
+  </Step>
+  
+  <Step title="Confirm selection">
+    Click **Open** in the file picker. Your invoice will be loaded and previewed.
+  </Step>
+</Steps>
+
+## File Information Display
+
+Once uploaded, Invoice OCR displays key information about your file:
+
+```tsx
+// Source: components/ocr-uploader.tsx:400-405
+<div>
+  <p className="font-medium">{file?.name || "Document uploaded"}</p>
+  <p className="text-sm text-muted-foreground">
+    {file && (file.size / 1024).toFixed(1)} KB • {isPdf ? "PDF" : "Image"}
+  </p>
+</div>
+```
+
+- **File name**: Original name of your uploaded file
+- **File size**: Displayed in KB for easy reference
+- **File type**: Automatically detected as "PDF" or "Image"
+
+## Changing the Uploaded File
+
+If you need to upload a different invoice:
+
+1. Click the **Change** button next to the file information
+2. Select a new file using the file picker
+3. The previous file will be replaced, and the preview will update
+
+<Note>
+  Changing the file will clear any previous extraction results. You'll need to click **Extract Data** again to process the new file.
+</Note>
+
+## Upload Area States
+
+The upload area provides visual feedback for different states:
+
+| State | Appearance | Description |
+|-------|------------|-------------|
+| **Empty** | Gray dashed border | Ready to accept a file |
+| **Dragging** | Blue border, scaled up | File is being dragged over the area |
+| **Uploaded** | Green border, gradient background | File successfully loaded |
+
+## File Validation
+
+The system performs automatic validation:
+
+```tsx
+// Source: components/ocr-uploader.tsx:134-142
+const files = e.dataTransfer.files;
+if (files && files.length > 0) {
+  const f = files[0];
+  if (f.type.startsWith("image/") || f.type === "application/pdf") {
+    handleFile(f);
+  } else {
+    setError("Please upload an image or PDF file");
+  }
+}
+```
+
+<Warning>
+  If you attempt to upload an unsupported file type, you'll see an error message: "Please upload an image or PDF file"
+</Warning>
+
+## Keyboard Shortcuts
+
+For faster workflow, use keyboard shortcuts:
+
+| Shortcut | Action | Description |
+|----------|--------|-------------|
+| `⌘K` / `Ctrl+K` | Show shortcuts | Display all available keyboard shortcuts |
+| `⌘↵` / `Ctrl+Enter` | Extract data | Process the uploaded invoice (when file is ready) |
+| `⌘⇧C` / `Ctrl+Shift+C` | Clear all | Remove the uploaded file and reset the interface |
+
+<Tip>
+  Press `⌘K` or `Ctrl+K` at any time to see the full list of keyboard shortcuts in a modal overlay.
+</Tip>
+
+## Next Steps
+
+After uploading your invoice:
+
+<CardGroup cols={2}>
+  <Card title="Configure Options" icon="sliders" href="#">
+    Select AI model, extraction mode, and schema format before processing
+  </Card>
+  <Card title="Extract Data" icon="bolt" href="#">
+    Click the Extract Data button to process your invoice with AI
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### File too large
+
+**Problem**: Your file exceeds the 10MB limit.
+
+**Solution**: 
+- Compress the image using tools like TinyPNG or ImageOptim
+- For PDFs, use PDF compression tools or reduce the resolution
+- If the invoice has multiple pages, consider splitting it
+
+### File not accepted
+
+**Problem**: The upload area rejects your file.
+
+**Solution**:
+- Verify the file extension is .png, .jpg, .jpeg, or .pdf
+- Check that the file isn't corrupted (try opening it in another application)
+- Ensure the file has the correct MIME type
+
+### Preview not showing
+
+**Problem**: File uploads but no preview appears.
+
+**Solution**:
+- Refresh the page and try uploading again
+- Try a different browser
+- Check browser console for errors (F12 → Console tab)

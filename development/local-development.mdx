@@ -1,0 +1,475 @@
+---
+title: Local Development
+description: Setting up your development environment and running Invoice OCR locally
+---
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- **Node.js** 20.x or higher
+- **npm** 9.x or higher
+- **Git** for version control
+- **OpenRouter API key** from [openrouter.ai/keys](https://openrouter.ai/keys)
+
+## Initial Setup
+
+### 1. Clone the Repository
+
+```bash
+git clone <repository-url>
+cd invoice-ocr
+```
+
+### 2. Install Dependencies
+
+```bash
+npm install
+```
+
+This will install all dependencies listed in `package.json`, including:
+- Next.js, React, and TypeScript
+- Tailwind CSS and shadcn/ui components
+- Vitest for testing
+- Development tools (ESLint, etc.)
+
+### 3. Configure Environment Variables
+
+Create a `.env.local` file in the project root:
+
+```bash
+touch .env.local
+```
+
+Add your OpenRouter API key:
+
+```bash
+OPENROUTER_API_KEY=your_api_key_here
+```
+
+<Note>
+  If a `.env.example` file exists, you can copy it: `cp .env.example .env.local`
+</Note>
+
+**Optional environment variables:**
+
+```bash
+# Model configuration
+OPENROUTER_MODEL=openai/gpt-4o-mini
+
+# PDF parsing engine (pdf-text | mistral-ocr | native)
+OPENROUTER_PDF_ENGINE=pdf-text
+
+# OpenRouter headers (best practices)
+OPENROUTER_SITE_URL=http://localhost:3000
+OPENROUTER_APP_NAME=Invoice OCR Dev
+```
+
+**Default behavior:**
+- `OPENROUTER_MODEL` defaults to `openai/gpt-4o-mini`, falls back to `google/gemini-2.0-flash` if unset
+- `OPENROUTER_PDF_ENGINE` defaults to `pdf-text`
+
+<Warning>
+  Never commit `.env.local` or any file containing secrets. This file is gitignored by default.
+</Warning>
+
+## Running the Development Server
+
+Start the Next.js development server:
+
+```bash
+npm run dev
+```
+
+The application will be available at:
+
+```
+http://localhost:3000
+```
+
+**Development server features:**
+- Hot module replacement (HMR)
+- Fast refresh for React components
+- Automatic TypeScript compilation
+- Real-time error overlay
+- API route hot reload
+
+### Alternative Package Managers
+
+```bash
+# Yarn
+yarn dev
+
+# pnpm
+pnpm dev
+
+# Bun
+bun dev
+```
+
+## Development Workflow
+
+### Hot Reload
+
+The development server automatically reloads when you make changes:
+
+**Client-side changes:**
+- Component files (`*.tsx`, `*.ts`)
+- Styles (`globals.css`, Tailwind classes)
+- Fast refresh preserves component state
+
+**Server-side changes:**
+- API routes (`app/api/*/route.ts`)
+- Server components
+- Configuration files (requires manual restart)
+
+### Project Structure Navigation
+
+Key directories to work in:
+
+```
+app/
+├── api/                # API endpoints (server-side)
+│   ├── ocr/           # Raw text OCR
+│   ├── ocr-structured/  # MyBillBook schema
+│   └── ocr-structured-v4/  # India GST normalized
+├── page.tsx           # Main upload interface
+└── review/page.tsx    # JSON review tool
+
+components/
+├── ocr-uploader.tsx   # File upload component
+├── invoice-viewer*.tsx  # Display components
+└── ui/                # shadcn/ui primitives
+
+lib/
+├── invoice_v4.ts      # Reconciliation logic
+└── __tests__/         # Test files
+```
+
+## Common Development Tasks
+
+### Running Tests
+
+**Watch mode** (recommended for TDD):
+```bash
+npm test
+```
+
+**Run once:**
+```bash
+npm run test:run
+```
+
+**With coverage:**
+```bash
+npm run test:coverage
+```
+
+Coverage reports are generated in:
+- Terminal (text)
+- `coverage/index.html` (browse in browser)
+- `coverage/coverage-final.json` (for CI)
+
+### Linting
+
+Run ESLint to check code quality:
+
+```bash
+npm run lint
+```
+
+**Fix auto-fixable issues:**
+```bash
+npm run lint -- --fix
+```
+
+<Note>
+  Fix all lint errors before committing. ESLint uses `next/core-web-vitals` rules.
+</Note>
+
+### Building for Production
+
+Create an optimized production build:
+
+```bash
+npm run build
+```
+
+This will:
+1. Type-check TypeScript
+2. Lint the codebase
+3. Bundle and optimize assets
+4. Generate static pages
+5. Create `.next/` output directory
+
+**Serve the production build locally:**
+```bash
+npm run start
+```
+
+### Type Checking
+
+TypeScript is checked automatically during build, but you can run it manually:
+
+```bash
+npx tsc --noEmit
+```
+
+## Development Tips
+
+### Code Organization
+
+**Import alias:**
+Use `@/` for all internal imports:
+
+```typescript
+// Good
+import { reconcileInvoice } from '@/lib/invoice_v4'
+import { Button } from '@/components/ui/button'
+
+// Avoid
+import { reconcileInvoice } from '../../../lib/invoice_v4'
+```
+
+**Component structure:**
+```typescript
+'use client' // if using client-side features
+
+import { useState } from 'react'
+import { cn } from '@/lib/utils'
+
+interface Props {
+  // props definition
+}
+
+export function ComponentName({ prop }: Props) {
+  // component logic
+  return (
+    <div className={cn("base-classes", "conditional-classes")}>
+      {/* content */}
+    </div>
+  )
+}
+```
+
+### Styling Best Practices
+
+**Use Tailwind utilities:**
+```typescript
+<div className="rounded-lg border p-4 hover:bg-accent transition-colors">
+```
+
+**Merge classes with `cn()`:**
+```typescript
+import { cn } from '@/lib/utils'
+
+<div className={cn(
+  "base-classes",
+  condition && "conditional-classes",
+  className // allow prop override
+)}>
+```
+
+### API Route Development
+
+API routes in `app/api/*/route.ts`:
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server'
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    
+    // Process request
+    const result = await processOCR(body)
+    
+    return NextResponse.json(result)
+  } catch (error) {
+    console.error('API error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
+```
+
+**Environment variables in API routes:**
+```typescript
+const apiKey = process.env.OPENROUTER_API_KEY
+if (!apiKey) {
+  throw new Error('OPENROUTER_API_KEY not configured')
+}
+```
+
+### Debugging
+
+**Console logging:**
+- Client components: Browser console
+- Server components: Terminal where `npm run dev` is running
+- API routes: Terminal output
+
+**Browser DevTools:**
+- React Developer Tools extension
+- Network tab for API calls
+- Console for client-side errors
+
+**VS Code debugging:**
+Add `.vscode/launch.json`:
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Next.js: debug server-side",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev"
+    }
+  ]
+}
+```
+
+## Testing the Application
+
+### Manual Testing Flow
+
+1. **Start development server:**
+   ```bash
+   npm run dev
+   ```
+
+2. **Visit `http://localhost:3000`**
+
+3. **Test OCR upload:**
+   - Drag and drop an invoice image
+   - Or click to select a file
+   - Verify extraction results
+
+4. **Test JSON review tool:**
+   - Visit `http://localhost:3000/review`
+   - Paste LangFuse trace JSON
+   - Verify reconciliation math
+
+### Unit Testing
+
+Add tests in `lib/__tests__/`:
+
+```typescript
+import { describe, it, expect } from 'vitest'
+import { reconcileInvoice } from '@/lib/invoice_v4'
+
+describe('reconcileInvoice', () => {
+  it('validates correct invoice totals', () => {
+    const invoice = {
+      // test data
+    }
+    const result = reconcileInvoice(invoice)
+    expect(result.isValid).toBe(true)
+  })
+})
+```
+
+Run tests:
+```bash
+npm test
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**Port 3000 already in use:**
+```bash
+# Kill the process using port 3000
+lsof -ti:3000 | xargs kill -9
+
+# Or use a different port
+PORT=3001 npm run dev
+```
+
+**TypeScript errors:**
+```bash
+# Clear Next.js cache
+rm -rf .next
+npm run dev
+```
+
+**Module not found:**
+```bash
+# Reinstall dependencies
+rm -rf node_modules package-lock.json
+npm install
+```
+
+**Environment variables not loading:**
+- Ensure `.env.local` exists in project root
+- Restart the dev server after changing `.env.local`
+- Check for typos in variable names
+
+**OpenRouter API errors:**
+- Verify `OPENROUTER_API_KEY` is set correctly
+- Check API key at https://openrouter.ai/keys
+- Review API limits and quotas
+
+### Getting Help
+
+**Project documentation:**
+- `README.md` - User-facing setup guide
+- `CLAUDE.MD` - Comprehensive project documentation
+- `AGENTS.md` - Repository guidelines and conventions
+
+**External resources:**
+- Next.js docs: https://nextjs.org/docs
+- OpenRouter docs: https://openrouter.ai/docs
+- Tailwind CSS: https://tailwindcss.com/docs
+
+## Git Workflow
+
+### Commit Guidelines
+
+Follow Conventional Commits format:
+
+```bash
+# Feature
+git commit -m "feat: add PDF upload support"
+
+# Bug fix
+git commit -m "fix: handle missing invoice fields"
+
+# Documentation
+git commit -m "docs: update API route examples"
+
+# Refactor
+git commit -m "refactor: extract reconciliation logic"
+
+# Tests
+git commit -m "test: add reconciliation edge cases"
+```
+
+### Pre-commit Checklist
+
+- [ ] Code compiles without TypeScript errors
+- [ ] All tests pass (`npm test`)
+- [ ] Lint checks pass (`npm run lint`)
+- [ ] No console.log statements left in code
+- [ ] No secrets in committed files
+- [ ] Changes are tested locally
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Project Structure" icon="folder-tree" href="/development/project-structure">
+    Understand the codebase organization
+  </Card>
+  <Card title="Tech Stack" icon="layer-group" href="/development/tech-stack">
+    Learn about the technologies used
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore the API endpoints
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/development/architecture/ocr-flow">
+    Learn about the system design
+  </Card>
+</CardGroup>

@@ -1,0 +1,288 @@
+---
+title: OpenRouter Setup
+description: Get started with OpenRouter and obtain your API key for Invoice OCR
+icon: key
+---
+
+OpenRouter provides unified access to multiple AI vision models through a single API. This guide walks you through setting up your account and obtaining an API key.
+
+## What is OpenRouter?
+
+OpenRouter is a unified API gateway that provides access to multiple AI models from providers like:
+- OpenAI (GPT-4o, GPT-4o-mini)
+- Anthropic (Claude 3.5 Sonnet, Claude 3 Opus)
+- Google (Gemini Pro, Gemini Flash)
+- And many more
+
+**Benefits:**
+- Single API key for all models
+- Pay-as-you-go pricing
+- Model fallbacks and routing
+- Usage analytics and monitoring
+
+## Step 1: Create an Account
+
+<Steps>
+  <Step title="Visit OpenRouter">
+    Go to [openrouter.ai](https://openrouter.ai)
+  </Step>
+  
+  <Step title="Sign Up">
+    Click "Sign In" in the top right corner and choose a sign-in method:
+    - GitHub
+    - Google
+    - Email
+  </Step>
+  
+  <Step title="Verify Your Account">
+    Follow the verification process for your chosen sign-in method.
+  </Step>
+</Steps>
+
+## Step 2: Add Credits
+
+OpenRouter uses a prepaid credit system.
+
+<Steps>
+  <Step title="Navigate to Credits">
+    After signing in, go to [openrouter.ai/credits](https://openrouter.ai/credits)
+  </Step>
+  
+  <Step title="Add Credits">
+    - Click "Add Credits"
+    - Choose an amount (minimum $5)
+    - Complete payment via Stripe
+  </Step>
+  
+  <Step title="Verify Balance">
+    Your credit balance will appear in the top right corner of the dashboard.
+  </Step>
+</Steps>
+
+<Note>
+**Pricing for Invoice OCR:**
+- Most invoices cost $0.001-$0.01 to process
+- A $5 credit can process 500-5000 invoices depending on model choice
+- See [Model Selection](/configuration/model-selection) for cost comparisons
+</Note>
+
+## Step 3: Generate API Key
+
+<Steps>
+  <Step title="Go to Keys Page">
+    Navigate to [openrouter.ai/keys](https://openrouter.ai/keys)
+  </Step>
+  
+  <Step title="Create New Key">
+    Click "Create Key" and provide:
+    - **Name**: e.g., "Invoice OCR Development"
+    - **Credit limit** (optional): Set a spending limit for this key
+    - **Allowed origins** (optional): Restrict to specific domains
+  </Step>
+  
+  <Step title="Copy the Key">
+    Your API key will be displayed **only once**. Copy it immediately.
+    
+    Format: `sk-or-v1-...` (64 characters)
+  </Step>
+  
+  <Step title="Save to .env.local">
+    Create or edit `.env.local` in your project root:
+    ```bash
+    OPENROUTER_API_KEY=sk-or-v1-your-key-here
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+**Security Best Practices:**
+- Never commit `.env.local` to version control
+- Don't share your API key publicly
+- Don't embed keys in client-side code
+- Rotate keys regularly
+- Use separate keys for development and production
+</Warning>
+
+## Step 4: Verify Setup
+
+Test your configuration:
+
+<Steps>
+  <Step title="Start Development Server">
+    ```bash
+    npm run dev
+    ```
+  </Step>
+  
+  <Step title="Open the Application">
+    Navigate to [http://localhost:3000](http://localhost:3000)
+  </Step>
+  
+  <Step title="Upload a Test Invoice">
+    - Click "Upload Invoice" or drag-and-drop an image
+    - Select an OCR mode (try "Normalized GST v4")
+    - Click "Extract"
+  </Step>
+  
+  <Step title="Check Results">
+    If setup is correct, you'll see:
+    - Extracted invoice data in JSON format
+    - No API key errors in the console
+  </Step>
+</Steps>
+
+## API Key Management
+
+### Multiple Keys
+
+Create separate API keys for different environments:
+
+```bash .env.local (development)
+OPENROUTER_API_KEY=sk-or-v1-dev-key-here
+```
+
+```bash .env.production (production)
+OPENROUTER_API_KEY=sk-or-v1-prod-key-here
+```
+
+### Key Limits
+
+Set spending limits per key:
+1. Go to [openrouter.ai/keys](https://openrouter.ai/keys)
+2. Click on a key to edit
+3. Set "Credit Limit" (e.g., $10/month)
+4. Save changes
+
+<Note>
+This prevents unexpected charges if your application has high usage or is compromised.
+</Note>
+
+### Rotating Keys
+
+Rotate keys periodically for security:
+
+<Steps>
+  <Step title="Create New Key">
+    Generate a new key at [openrouter.ai/keys](https://openrouter.ai/keys)
+  </Step>
+  
+  <Step title="Update .env.local">
+    Replace the old key with the new one
+  </Step>
+  
+  <Step title="Restart Server">
+    Stop and restart your development server
+  </Step>
+  
+  <Step title="Verify">
+    Test an API call to ensure the new key works
+  </Step>
+  
+  <Step title="Delete Old Key">
+    Once verified, delete the old key from OpenRouter dashboard
+  </Step>
+</Steps>
+
+## Monitoring Usage
+
+Track your API usage and costs:
+
+### Usage Dashboard
+
+1. Go to [openrouter.ai/activity](https://openrouter.ai/activity)
+2. View:
+   - Request count by model
+   - Total cost per day/week/month
+   - Average cost per request
+   - Error rates
+
+### Per-Key Analytics
+
+View usage for a specific key:
+1. Go to [openrouter.ai/keys](https://openrouter.ai/keys)
+2. Click on a key name
+3. View detailed usage stats
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Invalid API key error">
+    **Possible causes:**
+    - Key copied incorrectly (check for extra spaces)
+    - Key was deleted from OpenRouter dashboard
+    - Key expired or reached credit limit
+    
+    **Solution:**
+    - Verify key in `.env.local` matches dashboard
+    - Generate new key if needed
+    - Check credit balance
+  </Accordion>
+  
+  <Accordion title="Insufficient credits">
+    **Error message:** "Insufficient credits" or 402 status code
+    
+    **Solution:**
+    1. Go to [openrouter.ai/credits](https://openrouter.ai/credits)
+    2. Add more credits
+    3. Retry the request
+  </Accordion>
+  
+  <Accordion title="Rate limit exceeded">
+    **Error message:** "Rate limit exceeded" or 429 status code
+    
+    **Solution:**
+    - Wait a few seconds and retry
+    - Implement exponential backoff in your code
+    - Upgrade to a higher tier plan if needed
+  </Accordion>
+  
+  <Accordion title="Model not available">
+    **Error message:** "Model not found" or "Model not available"
+    
+    **Solution:**
+    - Check available models at [openrouter.ai/models](https://openrouter.ai/models)
+    - Some models require allowlist access
+    - Update `OPENROUTER_MODEL` to a supported model
+  </Accordion>
+</AccordionGroup>
+
+## OpenRouter Headers
+
+Invoice OCR sends the following headers to OpenRouter:
+
+```typescript
+headers: {
+  'Content-Type': 'application/json',
+  'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+  'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost:3000',
+  'X-Title': process.env.OPENROUTER_APP_NAME || 'Invoice OCR',
+}
+```
+
+**Why these headers?**
+- `HTTP-Referer`: Identifies your application in OpenRouter analytics
+- `X-Title`: Displays a friendly name in your usage dashboard
+
+Configure these in `.env.local`:
+
+```bash
+OPENROUTER_SITE_URL=https://your-domain.com
+OPENROUTER_APP_NAME=Your App Name
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Environment Variables" icon="terminal" href="/configuration/environment-variables">
+    Complete reference for all configuration options
+  </Card>
+  <Card title="Model Selection" icon="brain" href="/configuration/model-selection">
+    Choose the best model for your use case
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/getting-started/quick-start">
+    Start extracting invoice data
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview/ocr-structured-v4">
+    Integrate OCR into your application
+  </Card>
+</CardGroup>

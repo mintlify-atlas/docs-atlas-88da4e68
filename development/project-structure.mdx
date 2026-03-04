@@ -1,0 +1,204 @@
+---
+title: Project Structure
+description: Repository layout, directory organization, and key files in the Invoice OCR codebase
+---
+
+## Overview
+
+The Invoice OCR project follows Next.js 15 App Router conventions with a clear separation between UI components, business logic, and API routes.
+
+## Directory Structure
+
+```
+invoice-ocr/
+├── app/                          # Next.js App Router
+│   ├── api/                      # API routes
+│   │   ├── models/               # Model listing endpoint
+│   │   ├── ocr/                  # Raw text OCR
+│   │   ├── ocr-structured/       # MyBillBook schema extraction
+│   │   └── ocr-structured-v4/    # India GST normalized output
+│   ├── compare/                  # Comparison UI page
+│   ├── review/                   # LangFuse JSON review tool
+│   ├── layout.tsx                # Root layout
+│   ├── page.tsx                  # Main upload interface
+│   └── globals.css               # Global styles (Tailwind)
+├── components/                   # React components
+│   ├── ui/                       # shadcn/ui components
+│   ├── confetti.tsx              # Celebration animation
+│   ├── invoice-viewer.tsx        # Compact schema viewer
+│   ├── invoice-viewer-v4.tsx     # v4 schema viewer
+│   └── ocr-uploader.tsx          # File upload component
+├── lib/                          # Business logic & utilities
+│   ├── __tests__/                # Vitest test files
+│   │   ├── invoice_v4.test.ts    # Reconciliation engine tests
+│   │   └── standards.test.ts     # Standards compliance tests
+│   ├── invoice.ts                # Compact schema reconciliation
+│   ├── invoice_v4.ts             # v4 normalized schema logic
+│   └── utils.ts                  # Utility functions
+├── public/                       # Static assets
+├── eslint.config.mjs             # ESLint configuration
+├── next.config.ts                # Next.js configuration
+├── package.json                  # Dependencies & scripts
+├── postcss.config.mjs            # PostCSS configuration
+├── tsconfig.json                 # TypeScript configuration
+└── vitest.config.ts              # Vitest test configuration
+```
+
+## Core Directories
+
+### `app/`
+
+Next.js App Router directory containing pages, layouts, and API routes.
+
+**API Routes:**
+- `app/api/ocr/route.ts` - Raw text extraction from images and PDFs
+- `app/api/ocr-structured/route.ts` - Structured JSON extraction for MyBillBook schema
+- `app/api/ocr-structured-v4/route.ts` - Normalized India GST output with reconciliation
+- `app/api/models/route.ts` - List available OpenRouter models
+
+**Pages:**
+- `app/page.tsx` - Main upload interface for OCR processing
+- `app/review/page.tsx` - LangFuse JSON review tool for debugging OCR responses
+- `app/compare/page.tsx` - Side-by-side comparison interface
+- `app/layout.tsx` - Root layout with metadata and font configuration
+
+### `components/`
+
+React components organized by feature and UI primitives.
+
+**Feature Components:**
+- `ocr-uploader.tsx` - Handles file uploads (images/PDFs) with drag-and-drop
+- `invoice-viewer.tsx` - Displays compact schema invoice data
+- `invoice-viewer-v4.tsx` - Displays v4 normalized schema with reconciliation details
+- `confetti.tsx` - Celebration animation for successful operations
+
+**UI Components (`components/ui/`):**
+Shadcn/ui components including buttons, labels, separators, and other primitives built on Radix UI.
+
+### `lib/`
+
+Business logic and utility functions.
+
+**Core Logic:**
+- `invoice.ts` - Compact schema reconciliation logic
+- `invoice_v4.ts` - v4 normalized schema with India GST validation
+- `utils.ts` - Utility functions (e.g., `cn()` for class merging)
+
+**Tests (`lib/__tests__/`):**
+- `invoice_v4.test.ts` - Comprehensive tests for reconciliation engine
+- `standards.test.ts` - Standards compliance validation tests
+
+### `public/`
+
+Static assets served directly by Next.js.
+
+## Configuration Files
+
+### TypeScript Configuration
+
+**`tsconfig.json`**
+- Strict mode enabled
+- Path alias `@/*` maps to repo root
+- App Router and React 19 compiler options
+
+### Next.js Configuration
+
+**`next.config.ts`**
+- App Router configuration
+- Image optimization settings
+- Environment variable handling
+
+### Testing Configuration
+
+**`vitest.config.ts`**
+- Globals enabled for test utilities
+- Node environment for API testing
+- Path alias support (`@/`)
+- Coverage configuration (v8 provider)
+- Includes `lib/**/*.ts` for coverage tracking
+
+### Styling Configuration
+
+**`postcss.config.mjs`**
+- Tailwind CSS v4 with `@tailwindcss/postcss`
+
+**`app/globals.css`**
+- Tailwind directives
+- CSS custom properties for theming
+- shadcn/ui base styles
+
+### Linting Configuration
+
+**`eslint.config.mjs`**
+- Extends `next/core-web-vitals`
+- TypeScript-aware linting rules
+
+## Key Files
+
+### Entry Points
+
+- `app/layout.tsx` - Root layout, metadata, and Geist font
+- `app/page.tsx` - Main application interface
+- `app/api/*/route.ts` - API endpoint handlers
+
+### Business Logic
+
+- `lib/invoice_v4.ts` - Core reconciliation engine with:
+  - Line item validation (quantity × rate)
+  - Discount calculations
+  - GST/tax computation (CGST, SGST, IGST)
+  - Additional charges (shipping, handling)
+  - Total reconciliation (tolerance ≤ ₹0.05)
+
+### Component Patterns
+
+- Functional React components (TypeScript)
+- Kebab-case filenames (`invoice-viewer-v4.tsx`)
+- PascalCase component names
+- `@/` imports for all internal modules
+
+## Import Path Alias
+
+All imports use the `@/` alias to reference the repository root:
+
+```typescript
+import { reconcileInvoice } from '@/lib/invoice_v4'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+```
+
+## Environment Configuration
+
+Environment variables are configured in `.env.local` (gitignored):
+
+**Required:**
+- `OPENROUTER_API_KEY` - Your OpenRouter API key
+
+**Optional:**
+- `OPENROUTER_MODEL` - Model to use (default: `openai/gpt-4o-mini`, fallback: `google/gemini-2.0-flash`)
+- `OPENROUTER_PDF_ENGINE` - PDF parser engine (`pdf-text` | `mistral-ocr` | `native`)
+- `OPENROUTER_SITE_URL` - Your site URL for OpenRouter headers
+- `OPENROUTER_APP_NAME` - App name for OpenRouter headers
+
+<Note>
+  Never commit secrets or `.env.local` files. All sensitive configuration should remain local only.
+</Note>
+
+## File Naming Conventions
+
+- **Components**: `kebab-case.tsx` (e.g., `invoice-viewer-v4.tsx`)
+- **Types**: PascalCase for exported names
+- **Routes**: `route.ts` for API endpoints
+- **Pages**: `page.tsx` for App Router pages
+- **Tests**: `*.test.ts` in `lib/__tests__/` directory
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tech Stack" icon="layer-group" href="/development/tech-stack">
+    Learn about the technologies and frameworks used
+  </Card>
+  <Card title="Local Development" icon="code" href="/development/local-development">
+    Set up your development environment
+  </Card>
+</CardGroup>

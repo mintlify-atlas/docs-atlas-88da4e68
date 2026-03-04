@@ -1,0 +1,341 @@
+---
+title: Tech Stack
+description: Technologies, frameworks, and libraries used in Invoice OCR
+---
+
+## Overview
+
+Invoice OCR is built with modern web technologies focused on type safety, performance, and developer experience.
+
+## Core Technologies
+
+### Framework
+
+<CardGroup cols={1}>
+  <Card title="Next.js 15.5.2" icon="react">
+    React framework with App Router, server components, and API routes
+  </Card>
+</CardGroup>
+
+**Why Next.js:**
+- App Router for modern routing and layouts
+- Server-side API routes for secure OpenRouter integration
+- Automatic code splitting and optimization
+- Built-in TypeScript support
+- Image and font optimization
+
+**Key Features Used:**
+- App Router (`app/` directory)
+- Route handlers for API endpoints
+- Server and client components
+- `next/font` for Geist font optimization
+
+### Language
+
+<CardGroup cols={1}>
+  <Card title="TypeScript 5" icon="code">
+    Strict mode enabled for maximum type safety
+  </Card>
+</CardGroup>
+
+**Configuration:**
+- Strict mode enabled in `tsconfig.json`
+- Path alias `@/*` for clean imports
+- Type checking for React 19 JSX
+- ESNext target for modern JavaScript features
+
+**Benefits:**
+- Catch errors at compile time
+- Enhanced IDE autocomplete
+- Self-documenting code
+- Refactoring confidence
+
+## UI & Styling
+
+### React 19.1.0
+
+**Modern React features:**
+- Functional components with hooks
+- Server and client components
+- Async server components
+- React 19 compiler optimizations
+
+### Tailwind CSS v4
+
+**Utility-first CSS framework:**
+- `@tailwindcss/postcss` plugin
+- Custom design system via CSS variables
+- Responsive design utilities
+- Dark mode support
+
+**Styling approach:**
+```typescript
+// Example from components
+import { cn } from '@/lib/utils'
+
+export function Component({ className }) {
+  return (
+    <div className={cn(
+      "rounded-lg border p-4",
+      "hover:bg-accent transition-colors",
+      className
+    )}>
+      {/* content */}
+    </div>
+  )
+}
+```
+
+### shadcn/ui
+
+**Component library built on:**
+- Radix UI primitives (`@radix-ui/react-*`)
+- Tailwind CSS for styling
+- `class-variance-authority` for variants
+
+**Components in use:**
+- Button
+- Label
+- Separator
+- Custom styled primitives in `components/ui/`
+
+**Installation pattern:**
+Components are copied into the codebase (not installed as a package), allowing full customization.
+
+### UI Utilities
+
+```json
+"lucide-react": "^0.542.0"     // Icon library
+"clsx": "^2.1.1"               // Conditional classes
+"tailwind-merge": "^3.3.1"     // Merge Tailwind classes
+"tw-animate-css": "^1.3.7"     // Animation utilities
+```
+
+## OCR & AI
+
+### OpenRouter API
+
+**Provider:** https://openrouter.ai
+
+**Features used:**
+- Vision models for OCR (image → text)
+- Structured JSON output (`response_format: json_object`)
+- PDF processing via `file-parser` plugin
+- Multiple model support
+
+**Default models:**
+- Primary: `openai/gpt-4o-mini` (configurable via `OPENROUTER_MODEL`)
+- Fallback: `google/gemini-2.0-flash`
+
+**PDF engines:**
+- `pdf-text` (default) - Text extraction
+- `mistral-ocr` - OCR-based extraction
+- `native` - Model's native PDF support
+
+## Testing
+
+### Vitest 4.0.15
+
+**Modern test framework:**
+- Fast, Vite-powered test runner
+- Jest-compatible API
+- Native TypeScript support
+- Watch mode for TDD
+
+**Configuration (`vitest.config.ts`):**
+```typescript
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: 'node',
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      include: ['lib/**/*.ts']
+    }
+  },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './')
+    }
+  }
+})
+```
+
+### Coverage: @vitest/coverage-v8
+
+**Coverage reports:**
+- Text output in terminal
+- JSON for CI/CD integration
+- HTML for detailed browsing
+
+**Current test files:**
+- `lib/__tests__/invoice_v4.test.ts` - Reconciliation engine
+- `lib/__tests__/standards.test.ts` - Standards compliance
+
+## Development Tools
+
+### Linting & Formatting
+
+```json
+"eslint": "^9"                    // Linting
+"eslint-config-next": "15.5.2"    // Next.js rules
+```
+
+**Configuration:**
+- `eslint.config.mjs` extends `next/core-web-vitals`
+- TypeScript-aware rules
+- Automatic fixes for many issues
+
+### Type Definitions
+
+```json
+"@types/node": "^20"              // Node.js types
+"@types/react": "^19"             // React types
+"@types/react-dom": "^19"         // React DOM types
+```
+
+## Package Manager
+
+**npm** (Node Package Manager)
+
+**Key scripts:**
+```bash
+npm run dev         # Start dev server
+npm run build       # Production build
+npm run start       # Serve production build
+npm run lint        # Run ESLint
+npm test            # Run Vitest in watch mode
+npm run test:run    # Run tests once
+npm run test:coverage # Generate coverage report
+```
+
+## Architecture Patterns
+
+### Component Organization
+
+```
+components/
+├── ui/              # Primitive components (buttons, labels)
+└── [features]/      # Feature-specific components
+```
+
+### Logic Separation
+
+```
+lib/
+├── invoice.ts       # Business logic
+├── invoice_v4.ts    # Advanced reconciliation
+└── utils.ts         # Shared utilities
+```
+
+### API Design
+
+```
+app/api/
+├── ocr/                    # Raw text OCR
+├── ocr-structured/         # MyBillBook schema
+└── ocr-structured-v4/      # India GST normalized
+```
+
+## Performance Optimizations
+
+### Next.js Built-ins
+
+- Automatic code splitting
+- Image optimization (`next/image`)
+- Font optimization (`next/font`)
+- Static and dynamic rendering
+
+### Build Optimizations
+
+- Tree shaking for unused code
+- Minification in production
+- CSS extraction and optimization
+- Compression and caching headers
+
+## Dependencies Summary
+
+### Production Dependencies
+
+```json
+{
+  "@radix-ui/react-label": "^2.1.7",
+  "@radix-ui/react-separator": "^1.1.7",
+  "@radix-ui/react-slot": "^1.2.3",
+  "class-variance-authority": "^0.7.1",
+  "clsx": "^2.1.1",
+  "lucide-react": "^0.542.0",
+  "next": "15.5.2",
+  "react": "19.1.0",
+  "react-dom": "19.1.0",
+  "tailwind-merge": "^3.3.1"
+}
+```
+
+### Development Dependencies
+
+```json
+{
+  "@eslint/eslintrc": "^3",
+  "@tailwindcss/postcss": "^4",
+  "@types/node": "^20",
+  "@types/react": "^19",
+  "@types/react-dom": "^19",
+  "@vitest/coverage-v8": "^4.0.15",
+  "eslint": "^9",
+  "eslint-config-next": "15.5.2",
+  "tailwindcss": "^4",
+  "tw-animate-css": "^1.3.7",
+  "typescript": "^5",
+  "vitest": "^4.0.15"
+}
+```
+
+## External Services
+
+### OpenRouter
+
+**API endpoint:** `https://openrouter.ai/api/v1/chat/completions`
+
+**Authentication:** Bearer token via `OPENROUTER_API_KEY`
+
+**Headers:**
+- `HTTP-Referer` - Site URL for analytics
+- `X-Title` - App name for identification
+
+**Request format:**
+```typescript
+{
+  model: string,
+  messages: Array<{
+    role: 'user' | 'system',
+    content: Array<{type: 'text' | 'image_url', ...}>
+  }>,
+  response_format: { type: 'json_object' },
+  plugins?: Array<{name: string, options: object}>
+}
+```
+
+## Version Requirements
+
+- **Node.js**: 20.x or higher recommended
+- **npm**: 9.x or higher
+- **TypeScript**: 5.x
+- **React**: 19.1.0
+- **Next.js**: 15.5.2
+
+<Note>
+  Check `package.json` for the exact versions of all dependencies.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Project Structure" icon="folder-tree" href="/development/project-structure">
+    Explore the repository layout and organization
+  </Card>
+  <Card title="Local Development" icon="code" href="/development/local-development">
+    Set up your development environment
+  </Card>
+</CardGroup>

@@ -1,0 +1,723 @@
+---
+title: POST /api/ocr-structured-v4
+description: Advanced India GST invoice extraction with comprehensive reconciliation
+---
+
+The `/api/ocr-structured-v4` endpoint provides the most advanced invoice extraction with comprehensive India GST support, multi-page PDF processing, and sophisticated reconciliation logic.
+
+## Endpoint
+
+```
+POST /api/ocr-structured-v4
+```
+
+## Request Body
+
+<ParamField path="imageBase64" type="string">
+  Base64-encoded image data or data URL. Required if `pdfUrl` and `pdfBase64` are not provided.
+  
+  Formats:
+  - Bare base64: `iVBORw0KGgoAAAANS...`
+  - Data URL: `data:image/png;base64,iVBORw0KGgo...`
+</ParamField>
+
+<ParamField path="mimeType" type="string" default="image/png">
+  MIME type of the image (e.g., `image/png`, `image/jpeg`, `image/webp`)
+</ParamField>
+
+<ParamField path="pdfUrl" type="string">
+  Publicly accessible URL to a PDF document. Required if `imageBase64` and `pdfBase64` are not provided.
+</ParamField>
+
+<ParamField path="pdfBase64" type="string">
+  Base64-encoded PDF data or data URL. Required if `imageBase64` and `pdfUrl` are not provided.
+</ParamField>
+
+<ParamField path="filename" type="string" default="invoice.pdf">
+  Optional filename for PDF documents
+</ParamField>
+
+<ParamField path="model" type="string">
+  Override the default model. Default: `google/gemini-2.0-flash` if `OPENROUTER_MODEL` not set
+</ParamField>
+
+<ParamField path="annotations" type="object">
+  Pass-through OpenRouter annotations to avoid re-parsing costs on subsequent requests
+</ParamField>
+
+<ParamField path="plugins" type="array">
+  Override PDF parsing plugins. Advanced use only.
+  
+  Default:
+  ```json
+  [
+    {
+      "id": "file-parser",
+      "pdf": { "engine": "pdf-text" }
+    }
+  ]
+  ```
+</ParamField>
+
+## Response Schema
+
+The v4 schema provides comprehensive invoice data with normalized GST calculations:
+
+### Document Level
+
+<ResponseField name="doc_level" type="object">
+  Invoice header metadata
+
+  <Expandable title="properties">
+    <ResponseField name="supplier_name" type="string">
+      Supplier/seller name
+    </ResponseField>
+
+    <ResponseField name="supplier_gstin" type="string">
+      Supplier GSTIN (15 characters)
+    </ResponseField>
+
+    <ResponseField name="invoice_number" type="string">
+      Invoice number
+    </ResponseField>
+
+    <ResponseField name="invoice_date" type="string">
+      Invoice date in YYYY-MM-DD format
+    </ResponseField>
+
+    <ResponseField name="place_of_supply_state_code" type="string">
+      State code (2 digits, e.g., "27" for Maharashtra)
+    </ResponseField>
+
+    <ResponseField name="buyer_gstin" type="string">
+      Buyer GSTIN
+    </ResponseField>
+
+    <ResponseField name="currency" type="string">
+      Currency code (typically "INR")
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Items Array
+
+<ResponseField name="items" type="array">
+  Line items with detailed breakdowns
+
+  <Expandable title="items">
+    <ResponseField name="name" type="string">
+      Item name or description
+    </ResponseField>
+
+    <ResponseField name="hsn" type="string">
+      HSN/SAC code
+    </ResponseField>
+
+    <ResponseField name="qty" type="number">
+      Quantity
+    </ResponseField>
+
+    <ResponseField name="uom" type="string">
+      Unit of measurement (GST UQC code: NOS, PCS, KGS, LTR, etc.)
+    </ResponseField>
+
+    <ResponseField name="rate_ex_tax" type="number">
+      Tax-exclusive unit rate
+    </ResponseField>
+
+    <ResponseField name="discount" type="object">
+      Discount breakdown
+
+      <Expandable title="properties">
+        <ResponseField name="d1_pct" type="number | null">
+          First discount percentage (e.g., Trade Discount)
+        </ResponseField>
+
+        <ResponseField name="d2_pct" type="number | null">
+          Second discount percentage (e.g., Special Discount)
+        </ResponseField>
+
+        <ResponseField name="flat_per_unit" type="number | null">
+          Flat discount per unit (applied after percentages)
+        </ResponseField>
+
+        <ResponseField name="effective_pct" type="number">
+          Combined effective discount percentage
+        </ResponseField>
+
+        <ResponseField name="amount" type="number">
+          Total discount amount
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+
+    <ResponseField name="gst" type="object">
+      GST breakdown
+
+      <Expandable title="properties">
+        <ResponseField name="rate" type="number">
+          GST rate percentage (0, 0.25, 3, 5, 12, 18, or 28)
+        </ResponseField>
+
+        <ResponseField name="cgst" type="number">
+          CGST amount (intra-state)
+        </ResponseField>
+
+        <ResponseField name="sgst" type="number">
+          SGST amount (intra-state)
+        </ResponseField>
+
+        <ResponseField name="igst" type="number">
+          IGST amount (inter-state)
+        </ResponseField>
+
+        <ResponseField name="amount" type="number">
+          Total GST amount (CGST+SGST or IGST)
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+
+    <ResponseField name="totals" type="object">
+      Line totals
+
+      <Expandable title="properties">
+        <ResponseField name="line_ex_tax" type="number">
+          Line total excluding tax
+        </ResponseField>
+
+        <ResponseField name="line_inc_tax" type="number">
+          Line total including tax
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+
+    <ResponseField name="raw" type="object">
+      Raw values from invoice for debugging
+
+      <Expandable title="properties">
+        <ResponseField name="rate_printed" type="number | null">
+          Rate as printed on invoice
+        </ResponseField>
+
+        <ResponseField name="price_mode_detected" type="string">
+          `"WITH_TAX"` or `"WITHOUT_TAX"`
+        </ResponseField>
+
+        <ResponseField name="discount_pct_printed" type="number | null">
+          First discount percentage printed
+        </ResponseField>
+
+        <ResponseField name="special_discount_pct_printed" type="number | null">
+          Second discount percentage printed
+        </ResponseField>
+
+        <ResponseField name="amount_printed" type="number | null">
+          Line amount as printed
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+
+    <ResponseField name="ui_hints" type="object">
+      Display hints for UI rendering
+
+      <Expandable title="properties">
+        <ResponseField name="qty_x_rate_text" type="string">
+          Formatted "10 × ₹1,000" string
+        </ResponseField>
+
+        <ResponseField name="discount_row" type="object">
+          Discount row display
+        </ResponseField>
+
+        <ResponseField name="tax_row" type="object">
+          Tax row display
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+
+    <ResponseField name="confidence" type="number">
+      Extraction confidence (0.0 to 1.0)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Header Discounts
+
+<ResponseField name="header_discounts" type="array">
+  Invoice-level discounts applied before charges and GST
+
+  <Expandable title="items">
+    <ResponseField name="label" type="string">
+      Discount name (e.g., "Trade Discount")
+    </ResponseField>
+
+    <ResponseField name="type" type="string">
+      `"PERCENT"` or `"FLAT"`
+    </ResponseField>
+
+    <ResponseField name="value" type="number">
+      Percentage or absolute amount
+    </ResponseField>
+
+    <ResponseField name="order" type="number">
+      Application order (1, 2, ...)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Charges
+
+<ResponseField name="charges" type="array">
+  Additional charges (Freight, Packing, Insurance, etc.)
+
+  <Expandable title="items">
+    <ResponseField name="label" type="string">
+      Charge name
+    </ResponseField>
+
+    <ResponseField name="ex_tax" type="number">
+      Charge amount excluding GST
+    </ResponseField>
+
+    <ResponseField name="gst_rate_hint" type="number | null">
+      GST rate if taxable
+    </ResponseField>
+
+    <ResponseField name="gst_amount" type="number">
+      GST on charge
+    </ResponseField>
+
+    <ResponseField name="inc_tax" type="number">
+      Charge amount including GST
+    </ResponseField>
+
+    <ResponseField name="taxable" type="boolean">
+      Whether charge is subject to GST
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### TCS
+
+<ResponseField name="tcs" type="object">
+  Tax Collected at Source
+
+  <Expandable title="properties">
+    <ResponseField name="rate" type="number">
+      TCS rate percentage
+    </ResponseField>
+
+    <ResponseField name="amount" type="number">
+      TCS amount
+    </ResponseField>
+
+    <ResponseField name="base_used" type="string">
+      Base for TCS calculation (typically "grand_total_before_tcs")
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Round-Off
+
+<ResponseField name="round_off" type="number">
+  Rounding adjustment (typically ±1.00)
+</ResponseField>
+
+### Totals
+
+<ResponseField name="totals" type="object">
+  Computed invoice totals
+
+  <Expandable title="properties">
+    <ResponseField name="items_ex_tax" type="number">
+      Total of all line items excluding tax
+    </ResponseField>
+
+    <ResponseField name="header_discounts_ex_tax" type="number">
+      Total header discounts
+    </ResponseField>
+
+    <ResponseField name="charges_ex_tax" type="number">
+      Total charges excluding GST
+    </ResponseField>
+
+    <ResponseField name="taxable_ex_tax" type="number">
+      Total taxable amount (items - discounts + charges)
+    </ResponseField>
+
+    <ResponseField name="gst_total" type="number">
+      Total GST amount
+    </ResponseField>
+
+    <ResponseField name="grand_total" type="number">
+      Final payable amount
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Printed Values
+
+<ResponseField name="printed" type="object">
+  Values extracted from printed subtotals/tables
+
+  <Expandable title="properties">
+    <ResponseField name="taxable_subtotal" type="number | null">
+      Printed taxable subtotal
+    </ResponseField>
+
+    <ResponseField name="gst_total" type="number | null">
+      Printed total GST
+    </ResponseField>
+
+    <ResponseField name="hsn_tax_table" type="array">
+      HSN-wise tax table if printed
+    </ResponseField>
+
+    <ResponseField name="grand_total" type="number | null">
+      Printed grand total
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Reconciliation
+
+<ResponseField name="reconciliation" type="object">
+  Calculation verification results
+
+  <Expandable title="properties">
+    <ResponseField name="error_absolute" type="number">
+      Absolute difference between computed and printed total
+    </ResponseField>
+
+    <ResponseField name="alternates_considered" type="array">
+      Alternative calculation strategies evaluated
+    </ResponseField>
+
+    <ResponseField name="warnings" type="array">
+      Warnings about potential issues
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Metadata
+
+<ResponseField name="meta" type="object">
+  Extraction metadata
+
+  <Expandable title="properties">
+    <ResponseField name="pages_processed" type="number">
+      Number of PDF pages processed
+    </ResponseField>
+
+    <ResponseField name="language" type="string">
+      Detected language (e.g., "en")
+    </ResponseField>
+
+    <ResponseField name="overall_confidence" type="number">
+      Overall extraction confidence (0.0 to 1.0)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example Requests
+
+<CodeGroup>
+
+```bash Image Upload
+curl -X POST https://your-domain.com/api/ocr-structured-v4 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "imageBase64": "data:image/png;base64,iVBORw0KGgo...",
+    "model": "google/gemini-2.0-flash"
+  }'
+```
+
+```bash PDF URL
+curl -X POST https://your-domain.com/api/ocr-structured-v4 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pdfUrl": "https://example.com/invoice.pdf",
+    "filename": "invoice.pdf"
+  }'
+```
+
+```bash PDF Base64
+curl -X POST https://your-domain.com/api/ocr-structured-v4 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pdfBase64": "JVBERi0xLjQKJeLjz9...",
+    "filename": "invoice.pdf",
+    "model": "google/gemini-2.0-flash"
+  }'
+```
+
+```javascript JavaScript/TypeScript
+const response = await fetch('/api/ocr-structured-v4', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    pdfUrl: 'https://example.com/invoice.pdf',
+    filename: 'invoice.pdf'
+  })
+});
+
+const invoice = await response.json();
+
+console.log('Invoice:', invoice.doc_level.invoice_number);
+console.log('Grand Total:', invoice.totals.grand_total);
+console.log('Error:', invoice.reconciliation.error_absolute);
+
+if (invoice.reconciliation.error_absolute <= 1.0) {
+  console.log('Reconciliation successful');
+} else {
+  console.warn('Reconciliation mismatch:', invoice.reconciliation.warnings);
+}
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    'https://your-domain.com/api/ocr-structured-v4',
+    json={
+        'pdfUrl': 'https://example.com/invoice.pdf',
+        'filename': 'invoice.pdf'
+    }
+)
+
+invoice = response.json()
+
+print(f"Invoice: {invoice['doc_level']['invoice_number']}")
+print(f"Supplier: {invoice['doc_level']['supplier_name']}")
+print(f"Grand Total: ₹{invoice['totals']['grand_total']:.2f}")
+print(f"Items: {len(invoice['items'])}")
+print(f"Reconciliation Error: ₹{invoice['reconciliation']['error_absolute']:.2f}")
+
+for item in invoice['items']:
+    print(f"  - {item['name']}: {item['qty']} × ₹{item['rate_ex_tax']} = ₹{item['totals']['line_inc_tax']}")
+```
+
+</CodeGroup>
+
+## Example Response
+
+```json Success (200) - Excerpt
+{
+  "doc_level": {
+    "supplier_name": "Tech Solutions Pvt Ltd",
+    "supplier_gstin": "27AABCT1234C1Z5",
+    "invoice_number": "INV-2024-001",
+    "invoice_date": "2024-01-15",
+    "place_of_supply_state_code": "27",
+    "buyer_gstin": "27AABCU9603R1ZM",
+    "currency": "INR"
+  },
+  "items": [
+    {
+      "name": "Premium Widget",
+      "hsn": "8517",
+      "qty": 10,
+      "uom": "PCS",
+      "rate_ex_tax": 1000.00,
+      "discount": {
+        "d1_pct": 10.0,
+        "d2_pct": 5.0,
+        "flat_per_unit": null,
+        "effective_pct": 14.5,
+        "amount": 1450.00
+      },
+      "gst": {
+        "rate": 18.0,
+        "cgst": 769.50,
+        "sgst": 769.50,
+        "igst": 0.00,
+        "amount": 1539.00
+      },
+      "totals": {
+        "line_ex_tax": 8550.00,
+        "line_inc_tax": 10089.00
+      },
+      "raw": {
+        "rate_printed": 1000.00,
+        "price_mode_detected": "WITHOUT_TAX",
+        "discount_pct_printed": 10.0,
+        "special_discount_pct_printed": 5.0,
+        "amount_printed": 8550.00
+      },
+      "ui_hints": {
+        "qty_x_rate_text": "10 × ₹1,000.00",
+        "discount_row": { "label": "Discount", "percent": 14.5, "amount": 1450.00 },
+        "tax_row": { "label": "GST @18%", "percent": 18.0, "amount": 1539.00 }
+      },
+      "confidence": 0.95
+    }
+  ],
+  "header_discounts": [],
+  "charges": [
+    {
+      "label": "Freight",
+      "ex_tax": 500.00,
+      "gst_rate_hint": 18.0,
+      "gst_amount": 90.00,
+      "inc_tax": 590.00,
+      "taxable": true
+    }
+  ],
+  "tcs": { "rate": 0.0, "amount": 0.0, "base_used": "grand_total_before_tcs" },
+  "round_off": -0.00,
+  "totals": {
+    "items_ex_tax": 8550.00,
+    "header_discounts_ex_tax": 0.0,
+    "charges_ex_tax": 500.00,
+    "taxable_ex_tax": 9050.00,
+    "gst_total": 1629.00,
+    "grand_total": 10679.00
+  },
+  "printed": {
+    "taxable_subtotal": 9050.00,
+    "gst_total": 1629.00,
+    "hsn_tax_table": [
+      { "hsn": "8517", "taxable": 9050.00, "cgst": 814.50, "sgst": 814.50, "total": 10679.00 }
+    ],
+    "grand_total": 10679.00
+  },
+  "reconciliation": {
+    "error_absolute": 0.00,
+    "alternates_considered": [],
+    "warnings": []
+  },
+  "meta": {
+    "pages_processed": 1,
+    "language": "en",
+    "overall_confidence": 0.92
+  }
+}
+```
+
+## Reconciliation Logic
+
+The v4 reconciliation engine (`lib/invoice_v4.ts`) performs sophisticated validation:
+
+1. **Price Mode Detection**: Determines if printed rates are WITH_TAX or WITHOUT_TAX by comparing with GST summary
+2. **Sequential Discounts**: Applies d1 then d2: `effective = d1 + d2 - (d1 × d2)`
+3. **Line Calculation**: `line_ex_tax = qty × rate_ex_tax × (1 - effective_pct) - flat_discount`
+4. **Header Discounts**: Applied to subtotal before charges and GST
+5. **Charges**: Added with GST (inherits weighted avg rate if not specified)
+6. **TCS**: Applied after GST
+7. **Round-Off**: Applied last
+8. **Validation**: Compares against printed totals and HSN tables
+9. **Alternate Strategies**: Tests multiple calculation approaches, selects lowest error
+
+## Schema Constraints
+
+The system prompt enforces:
+
+- **GST Slabs**: 0, 0.25, 3, 5, 12, 18, 28 (as percentages, not decimals)
+- **UQC Codes**: Valid GST unit codes only (NOS, PCS, KGS, LTR, MTR, etc.)
+- **Date Format**: YYYY-MM-DD (ISO 8601)
+- **Decimal Precision**: 2 decimals in final JSON, higher precision internally
+- **Unknown Values**: `null` with reduced confidence
+- **Round-Off**: Expected |round_off| ≤ 1.00 unless explicitly printed
+
+## Advanced Features
+
+### Multi-Page PDF Processing
+
+For PDFs, the endpoint:
+
+1. Processes all pages
+2. Prefers HSN tax tables and summaries (often on page 2+)
+3. Uses tables as reconciliation anchors
+4. Sets `meta.pages_processed` count
+
+### Price Mode Ambiguity
+
+When unclear if rates include GST:
+
+1. Tests BOTH `WITH_TAX` and `WITHOUT_TAX` modes
+2. Compares each against printed totals, HSN tables, and subtotals
+3. Prefers mode with lowest absolute error AND small round-off (≤ 1.00)
+4. Stores detected mode in `raw.price_mode_detected`
+
+### Confidence Scoring
+
+Each item includes `confidence` (0.0-1.0) based on:
+
+- OCR quality of relevant fields
+- Presence of validation anchors (HSN table, subtotals)
+- Calculation consistency
+- `meta.overall_confidence` aggregates across document
+
+### OpenRouter Annotations
+
+To avoid re-parsing costs on retries:
+
+1. First request processes the PDF
+2. OpenRouter returns `annotations` in response metadata
+3. Pass `annotations` in subsequent requests to reuse parsed content
+4. Significantly faster and cheaper for large PDFs
+
+## Migration from Legacy
+
+Upgrading from `/api/ocr-structured`:
+
+| Legacy Field | V4 Equivalent | Notes |
+|--------------|---------------|-------|
+| `voucher.invoice_number` | `doc_level.invoice_number` | Direct mapping |
+| `voucher.invoice_date` | `doc_level.invoice_date` | Format: dd-mm-yyyy → YYYY-MM-DD |
+| `items[].price` | `items[].rate_ex_tax` | Same concept |
+| `items[].tax_rate` | `items[].gst.rate` | Percentage (18, not 0.18) |
+| `items[].discount_rate` | `items[].discount.effective_pct` | V4 supports multi-level |
+| `voucher.invoice_discount` | `header_discounts[]` | Array for sequential discounts |
+| `voucher.additional_charges` | `charges[]` | Enhanced structure |
+| `party.*` | Not in v4 | Extract from `buyer_gstin` if needed |
+| `voucher.reconciliation.status` | `reconciliation.error_absolute` | Numeric error instead of binary status |
+
+## Best Practices
+
+<Steps>
+  <Step title="Use PDF for Multi-Page Invoices">
+    PDFs preserve better quality and allow processing multiple pages with tax summaries
+  </Step>
+  
+  <Step title="Validate HSN Tax Tables">
+    Check `printed.hsn_tax_table` matches `totals` for high-confidence extraction
+  </Step>
+  
+  <Step title="Monitor Reconciliation Error">
+    Accept `error_absolute ≤ 1.00` as normal rounding, investigate larger differences
+  </Step>
+  
+  <Step title="Use Confidence Scores">
+    Flag items with `confidence < 0.7` for manual review
+  </Step>
+  
+  <Step title="Cache Annotations for PDFs">
+    Store and reuse `annotations` from response to avoid re-parsing same PDFs
+  </Step>
+</Steps>
+
+## Limitations
+
+- Requires India GST format (GSTIN, HSN, CGST/SGST/IGST)
+- Optimized for myBillBook-style invoices
+- May struggle with highly custom layouts
+- Confidence scoring requires validation anchors
+- TCS support is basic (single rate, single base)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Reconciliation Engine" icon="calculator" href="/concepts/reconciliation-v4">
+    Deep dive into v4 reconciliation logic
+  </Card>
+  <Card title="Integration Guide" icon="code" href="/integration/v4-workflow">
+    Build a complete v4 extraction workflow
+  </Card>
+  <Card title="UI Components" icon="window" href="/components/invoice-viewer-v4">
+    Display v4 data with pre-built components
+  </Card>
+  <Card title="Testing" icon="vial" href="/testing/api-routes">
+    Test your v4 integration
+  </Card>
+</CardGroup>

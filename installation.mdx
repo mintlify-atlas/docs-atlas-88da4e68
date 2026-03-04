@@ -1,0 +1,468 @@
+---
+title: Installation
+description: Complete setup guide for Invoice OCR development environment
+---
+
+This guide covers everything you need to install and configure Invoice OCR for local development, testing, and deployment.
+
+## Prerequisites
+
+Before installing Invoice OCR, ensure you have:
+
+### Required Software
+
+- **Node.js**: Version 20 or higher
+- **Package Manager**: npm (included with Node.js), yarn, pnpm, or bun
+- **Git**: For cloning the repository
+
+<Note>
+  Check your Node.js version with `node --version`. Download the latest LTS version from [nodejs.org](https://nodejs.org) if needed.
+</Note>
+
+### Required Services
+
+- **OpenRouter Account**: Sign up at [openrouter.ai](https://openrouter.ai) to get an API key
+- **API Credits**: Fund your OpenRouter account for model usage (Gemini 2.5 Flash costs ~$0.30 per 1M input tokens)
+
+## Installation Steps
+
+<Steps>
+  <Step title="Clone the repository">
+    Get the Invoice OCR source code:
+    
+    ```bash
+    git clone <repository-url>
+    cd invoice-ocr
+    ```
+  </Step>
+  
+  <Step title="Install dependencies">
+    Install all required Node.js packages:
+    
+    <CodeGroup>
+    
+    ```bash npm
+    npm install
+    ```
+    
+    ```bash yarn
+    yarn install
+    ```
+    
+    ```bash pnpm
+    pnpm install
+    ```
+    
+    ```bash bun
+    bun install
+    ```
+    
+    </CodeGroup>
+    
+    This installs:
+    - **Next.js 15.5.2** - React framework with App Router
+    - **React 19** - UI library
+    - **Tailwind CSS v4** - Utility-first styling
+    - **shadcn/ui** - Accessible component library
+    - **Vitest** - Test runner with coverage support
+  </Step>
+  
+  <Step title="Configure environment variables">
+    Create your local configuration file:
+    
+    ```bash
+    cp .env.example .env.local
+    ```
+    
+    Edit `.env.local` with your OpenRouter credentials:
+    
+    ```bash .env.local
+    # Required: Your OpenRouter API key
+    OPENROUTER_API_KEY=sk-or-v1-...
+    
+    # Optional: Model selection
+    # Default: google/gemini-2.0-flash (if OPENROUTER_MODEL is unset)
+    # Example override:
+    OPENROUTER_MODEL=openai/gpt-4o-mini
+    
+    # Optional: PDF processing engine
+    # Options: pdf-text (default), mistral-ocr, native
+    OPENROUTER_PDF_ENGINE=pdf-text
+    
+    # Optional: OpenRouter headers (for usage tracking)
+    OPENROUTER_SITE_URL=http://localhost:3000
+    OPENROUTER_APP_NAME=Invoice OCR
+    ```
+  </Step>
+  
+  <Step title="Verify installation">
+    Start the development server:
+    
+    <CodeGroup>
+    
+    ```bash npm
+    npm run dev
+    ```
+    
+    ```bash yarn
+    yarn dev
+    ```
+    
+    ```bash pnpm
+    pnpm dev
+    ```
+    
+    ```bash bun
+    bun dev
+    ```
+    
+    </CodeGroup>
+    
+    You should see:
+    
+    ```bash Output
+    ▲ Next.js 15.5.2
+    - Local:        http://localhost:3000
+    - Network:      http://192.168.1.x:3000
+    
+    ✓ Ready in 1.2s
+    ```
+    
+    Visit [http://localhost:3000](http://localhost:3000) to confirm the application is running.
+  </Step>
+  
+  <Step title="Run tests">
+    Verify your installation by running the test suite:
+    
+    ```bash
+    npm test
+    ```
+    
+    This runs tests in watch mode. To run once:
+    
+    ```bash
+    npm run test:run
+    ```
+    
+    Expected output:
+    
+    ```bash Test Results
+    ✓ lib/__tests__/standards.test.ts (5)
+    ✓ lib/__tests__/invoice_v4.test.ts (23)
+    
+    Test Files  2 passed (2)
+    Tests  28 passed (28)
+    Duration  1.2s
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  The `.env.local` file contains secrets and is gitignored by default. Never commit this file to version control or share your API key publicly.
+</Warning>
+
+## Environment Configuration
+
+### Required Variables
+
+#### OPENROUTER_API_KEY
+
+Your OpenRouter API key for authentication.
+
+- **Get it**: [openrouter.ai/keys](https://openrouter.ai/keys)
+- **Format**: `sk-or-v1-...` (starts with `sk-or-v1-`)
+- **Security**: Keep this secret, never commit to git
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-abc123def456...
+```
+
+### Optional Variables
+
+#### OPENROUTER_MODEL
+
+Override the default vision model.
+
+- **Default**: `google/gemini-2.0-flash` (used when OPENROUTER_MODEL is not set)
+- **Example**: `openai/gpt-4o-mini`
+- **Options**: Any vision-capable model on OpenRouter
+
+```bash
+OPENROUTER_MODEL=openai/gpt-4o-mini
+```
+
+Recommended models:
+
+| Model | Speed | Accuracy | Cost | Best For |
+|-------|-------|----------|------|----------|
+| `google/gemini-2.5-flash` | Fast | High | Low | General use (recommended) |
+| `openai/gpt-4o-mini` | Fast | High | Medium | OpenAI preference |
+| `google/gemini-2.5-pro` | Slow | Highest | High | Complex multi-page invoices |
+| `openai/o3-mini` | Medium | High | Medium | Reasoning-heavy extraction |
+
+#### OPENROUTER_PDF_ENGINE
+
+PDF parsing engine for OpenRouter's file-parser plugin.
+
+- **Default**: `pdf-text`
+- **Options**: `pdf-text`, `mistral-ocr`, `native`
+
+```bash
+OPENROUTER_PDF_ENGINE=pdf-text
+```
+
+Engine comparison:
+
+- **pdf-text**: Fast text extraction, best for digital PDFs with embedded text
+- **mistral-ocr**: OCR-based extraction for scanned PDFs or images
+- **native**: Native PDF rendering, slower but more accurate for complex layouts
+
+#### OPENROUTER_SITE_URL and OPENROUTER_APP_NAME
+
+Optional headers for OpenRouter usage tracking.
+
+```bash
+OPENROUTER_SITE_URL=http://localhost:3000
+OPENROUTER_APP_NAME=Invoice OCR
+```
+
+These appear in your OpenRouter dashboard for attribution and monitoring.
+
+## Project Structure
+
+Understanding the codebase layout:
+
+```
+invoice-ocr/
+├── app/                      # Next.js App Router
+│   ├── api/                  # API routes
+│   │   ├── ocr/              # Raw text extraction
+│   │   │   └── route.ts
+│   │   ├── ocr-structured/   # MyBillBook schema
+│   │   │   └── route.ts
+│   │   └── ocr-structured-v4/ # India GST v4 + reconciliation
+│   │       └── route.ts
+│   ├── review/               # LangFuse JSON review tool
+│   │   └── page.tsx
+│   ├── page.tsx              # Main upload interface
+│   ├── layout.tsx            # Root layout
+│   └── globals.css           # Global styles
+├── components/               # React components
+│   ├── ocr-uploader.tsx      # File upload component
+│   ├── invoice-viewer.tsx    # Compact schema viewer
+│   ├── invoice-viewer-v4.tsx # v4 schema viewer
+│   ├── confetti.tsx          # Success animation
+│   └── ui/                   # shadcn/ui components
+├── lib/                      # Business logic
+│   ├── invoice.ts            # Compact schema reconciliation
+│   ├── invoice_v4.ts         # v4 reconciliation engine
+│   ├── utils.ts              # Utility functions
+│   └── __tests__/            # Vitest tests
+│       ├── invoice_v4.test.ts
+│       └── standards.test.ts
+├── public/                   # Static assets
+├── .env.local                # Environment config (gitignored)
+├── next.config.ts            # Next.js configuration
+├── tsconfig.json             # TypeScript config
+├── vitest.config.ts          # Test configuration
+└── package.json              # Dependencies and scripts
+```
+
+### Key Files
+
+- **`app/api/ocr-structured-v4/route.ts`**: Main OCR endpoint with reconciliation logic (line 1-407)
+- **`lib/invoice_v4.ts`**: Reconciliation engine that validates totals and tax calculations
+- **`components/ocr-uploader.tsx`**: React component for file upload and extraction UI
+
+## Available Scripts
+
+### Development
+
+```bash
+npm run dev
+```
+
+Starts the development server with hot reload at [http://localhost:3000](http://localhost:3000).
+
+### Build
+
+```bash
+npm run build
+```
+
+Creates an optimized production build in `.next/` directory.
+
+### Production Server
+
+```bash
+npm run start
+```
+
+Serves the production build. Run `npm run build` first.
+
+### Linting
+
+```bash
+npm run lint
+```
+
+Runs ESLint with Next.js and TypeScript rules. Fix errors before committing.
+
+### Testing
+
+```bash
+# Watch mode (recommended for development)
+npm test
+
+# Run once
+npm run test:run
+
+# Coverage report
+npm run test:coverage
+```
+
+Vitest automatically finds test files in `lib/__tests__/`.
+
+## Verifying Your Setup
+
+### Test the Web Interface
+
+<Steps>
+  <Step title="Navigate to the app">
+    Open [http://localhost:3000](http://localhost:3000)
+  </Step>
+  
+  <Step title="Upload a test invoice">
+    Use any invoice image or PDF for testing. If you don't have one:
+    - Search "sample invoice India GST" for free examples
+    - Use a personal receipt or invoice (data is not stored)
+  </Step>
+  
+  <Step title="Extract and verify">
+    Click **Extract Data** and confirm:
+    - Processing completes in 3-10 seconds
+    - Structured data appears in the right panel
+    - No error messages appear
+  </Step>
+</Steps>
+
+### Test the API Directly
+
+Verify the API is working:
+
+```bash
+curl -X POST http://localhost:3000/api/ocr-structured-v4 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "imageBase64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "mimeType": "image/png"
+  }'
+```
+
+Expected response:
+
+```json
+{
+  "doc_level": { ... },
+  "items": [ ... ],
+  "totals": { ... },
+  "reconciliation": {
+    "error_absolute": 0.00,
+    "alternates_considered": [],
+    "warnings": []
+  }
+}
+```
+
+## Troubleshooting
+
+### Port 3000 Already in Use
+
+```bash
+Error: listen EADDRINUSE: address already in use :::3000
+```
+
+**Solution**: Use a different port:
+
+```bash
+PORT=3001 npm run dev
+```
+
+### Module Not Found Errors
+
+```bash
+Error: Cannot find module '@/lib/invoice_v4'
+```
+
+**Solution**: Delete `node_modules` and reinstall:
+
+```bash
+rm -rf node_modules .next
+npm install
+npm run dev
+```
+
+### OpenRouter API Errors
+
+```json
+{
+  "error": "OpenRouter error: 401 Invalid API key"
+}
+```
+
+**Solutions**:
+1. Verify your API key is correct in `.env.local`
+2. Check you have credits in your OpenRouter account
+3. Restart the dev server after changing `.env.local`
+
+### TypeScript Errors
+
+```bash
+Type error: Property 'xyz' does not exist on type...
+```
+
+**Solution**: Run type checking:
+
+```bash
+npx tsc --noEmit
+```
+
+Fix errors in the reported files, then restart the dev server.
+
+## Deployment Considerations
+
+### Environment Variables in Production
+
+When deploying to production (Vercel, Netlify, etc.):
+
+1. Set environment variables in your hosting platform's dashboard
+2. Use production-grade API keys (not development keys)
+3. Set `OPENROUTER_SITE_URL` to your production domain
+4. Consider rate limiting and API key rotation
+
+### Security Best Practices
+
+- Never expose `OPENROUTER_API_KEY` in client-side code
+- All API routes run server-side in Next.js API routes
+- Validate and sanitize all user inputs
+- Implement request rate limiting for production
+- Monitor OpenRouter usage and set budget alerts
+
+### Performance Optimization
+
+- Use `google/gemini-2.5-flash` for best cost/performance ratio
+- Implement caching for repeated invoice processing
+- Consider batching for high-volume scenarios
+- Monitor reconciliation error rates and adjust prompts
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start Guide" icon="rocket" href="/quickstart">
+    Process your first invoice and understand the results
+  </Card>
+  
+  <Card title="API Documentation" icon="code" href="/api/overview">
+    Explore API endpoints, schemas, and integration examples
+  </Card>
+</CardGroup>

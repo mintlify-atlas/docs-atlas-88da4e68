@@ -1,0 +1,275 @@
+---
+title: "MyBillBook schema"
+description: "Compact schema format for the structured OCR endpoint"
+---
+
+The MyBillBook schema is a compact format returned by `/api/ocr-structured`. It follows the MyBillBook invoice data structure and is suitable for simpler invoice processing workflows.
+
+## InvoiceDoc Type
+
+The top-level document structure for the compact schema.
+
+<ResponseField name="voucher" type="object" required>
+  Invoice header information
+  
+  <Expandable title="properties">
+    <ResponseField name="invoice_number" type="string">
+      Invoice number or reference
+    </ResponseField>
+    
+    <ResponseField name="invoice_date" type="string">
+      Invoice date (YYYY-MM-DD format)
+    </ResponseField>
+    
+    <ResponseField name="invoice_due_date" type="string">
+      Payment due date (YYYY-MM-DD format)
+    </ResponseField>
+    
+    <ResponseField name="invoice_discount" type="string">
+      Invoice-level discount amount in ₹ (may be empty string)
+    </ResponseField>
+    
+    <ResponseField name="invoice_discount_mode" type="string">
+      When discount is applied: "before_tax", "after_tax", or ""
+    </ResponseField>
+    
+    <ResponseField name="round_off" type="string">
+      Round-off adjustment (may be empty string)
+    </ResponseField>
+    
+    <ResponseField name="total_invoice_amount" type="string">
+      Final printed invoice total
+    </ResponseField>
+    
+    <ResponseField name="additional_charges" type="AdditionalCharge[]">
+      Array of additional charges (see below)
+    </ResponseField>
+    
+    <ResponseField name="reconciliation" type="object">
+      Reconciliation results if processed
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="items" type="InvoiceItem[]" required>
+  Array of invoice line items (see [InvoiceItem](#invoiceitem-type) below)
+</ResponseField>
+
+<ResponseField name="party" type="object" required>
+  Buyer/customer information
+  
+  <Expandable title="properties">
+    <ResponseField name="party_gstin_number" type="string">
+      Customer's GSTIN
+    </ResponseField>
+    
+    <ResponseField name="party_name" type="string">
+      Customer name
+    </ResponseField>
+    
+    <ResponseField name="party_address" type="string">
+      Customer address
+    </ResponseField>
+    
+    <ResponseField name="party_city" type="string">
+      Customer city
+    </ResponseField>
+    
+    <ResponseField name="party_pincode" type="string">
+      Customer PIN code
+    </ResponseField>
+    
+    <ResponseField name="party_pan_number" type="string">
+      Customer PAN number
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## InvoiceItem Type
+
+Represents a single line item in the compact schema.
+
+<ResponseField name="name" type="string" required>
+  Item name or description
+</ResponseField>
+
+<ResponseField name="hsn_sac_code" type="string" required>
+  HSN or SAC code
+</ResponseField>
+
+<ResponseField name="quantity" type="string" required>
+  Quantity as a string
+</ResponseField>
+
+<ResponseField name="unit" type="string" required>
+  Unit of measurement (e.g., "PCS", "KGS")
+</ResponseField>
+
+<ResponseField name="price" type="string" required>
+  Unit price excluding tax (as a string)
+</ResponseField>
+
+<ResponseField name="tax_rate" type="string" required>
+  Tax rate percentage (e.g., "18" for 18% GST)
+</ResponseField>
+
+<ResponseField name="discount_rate" type="string" required>
+  Line-level discount percentage (e.g., "10" for 10% off)
+</ResponseField>
+
+## AdditionalCharge Type
+
+Represents additional charges like freight, packing, handling fees.
+
+<ResponseField name="name" type="string">
+  Charge name (alternative to `label`)
+</ResponseField>
+
+<ResponseField name="label" type="string">
+  Charge label (alternative to `name`)
+</ResponseField>
+
+<ResponseField name="amount" type="string | number">
+  Charge amount as printed (interpretation depends on `amount_includes_tax`)
+</ResponseField>
+
+<ResponseField name="tax_rate" type="string | number">
+  Tax rate percentage (may be combined CGST+SGST string like "9+9")
+</ResponseField>
+
+<ResponseField name="amount_includes_tax" type="boolean">
+  Whether `amount` is gross (including tax) or net (excluding tax)
+</ResponseField>
+
+<ResponseField name="ex_tax" type="string | number">
+  Normalized amount excluding tax (optional v4-style field)
+</ResponseField>
+
+<ResponseField name="inc_tax" type="string | number">
+  Normalized amount including tax (optional v4-style field)
+</ResponseField>
+
+<ResponseField name="gst_rate" type="string | number">
+  GST rate (optional v4-style field)
+</ResponseField>
+
+<ResponseField name="gst_rate_hint" type="string | number | null">
+  GST rate hint for inference (optional v4-style field)
+</ResponseField>
+
+<ResponseField name="gst_amount" type="string | number">
+  GST amount on this charge (optional v4-style field)
+</ResponseField>
+
+<ResponseField name="taxable" type="boolean">
+  Whether this charge is subject to tax (optional v4-style field)
+</ResponseField>
+
+## Example Response
+
+```json
+{
+  "voucher": {
+    "invoice_number": "INV-2024-001",
+    "invoice_date": "2024-03-01",
+    "invoice_due_date": "2024-03-31",
+    "invoice_discount": "50",
+    "invoice_discount_mode": "before_tax",
+    "round_off": "-0.50",
+    "total_invoice_amount": "1180.50",
+    "additional_charges": [
+      {
+        "name": "Freight",
+        "amount": "100",
+        "tax_rate": "18",
+        "amount_includes_tax": false
+      }
+    ]
+  },
+  "items": [
+    {
+      "name": "Widget A",
+      "hsn_sac_code": "8471",
+      "quantity": "10",
+      "unit": "PCS",
+      "price": "100",
+      "tax_rate": "18",
+      "discount_rate": "10"
+    },
+    {
+      "name": "Widget B",
+      "hsn_sac_code": "8472",
+      "quantity": "5",
+      "unit": "PCS",
+      "price": "50",
+      "tax_rate": "12",
+      "discount_rate": "0"
+    }
+  ],
+  "party": {
+    "party_gstin_number": "27AAPFU0939F1ZV",
+    "party_name": "XYZ Corp",
+    "party_address": "123 Main Street",
+    "party_city": "Mumbai",
+    "party_pincode": "400001",
+    "party_pan_number": "AAPFU0939F"
+  }
+}
+```
+
+## Reconciliation
+
+The compact schema can be processed through reconciliation logic (see `lib/invoice.ts:reconcileInvoice`) which:
+
+1. Computes line-level totals from quantity, price, discount, and tax
+2. Applies invoice-level discounts (before or after tax)
+3. Adds additional charges with tax handling
+4. Tests multiple hypotheses to match the printed total
+
+<Note>
+The reconciliation engine for this schema is separate from the V4 reconciliation engine. For more advanced reconciliation with HSN table anchoring and multi-hypothesis testing, use the [V4 schema](/api/schemas/v4-schema).
+</Note>
+
+## Comparison with V4 Schema
+
+| Feature | MyBillBook Schema | V4 Schema |
+|---------|-------------------|-----------|
+| **Format** | Compact, string-based | Normalized, number-based |
+| **Discount types** | Single percentage per line | Multiple sequential discounts (d1, d2, flat) |
+| **Tax representation** | Combined rate string | Separate CGST/SGST/IGST amounts |
+| **Reconciliation** | Simple hypothesis testing | 6-phase multi-candidate algorithm |
+| **HSN anchoring** | Not supported | Supported via HSN tax table |
+| **Use case** | Simpler invoices, basic extraction | Complex GST invoices, audit-ready data |
+
+## When to Use This Schema
+
+Use the MyBillBook schema when:
+
+- You need a simple, compact JSON format
+- You're integrating with systems expecting MyBillBook format
+- Invoice complexity is low (no complex discounting schemes)
+- You don't need detailed GST breakdowns
+
+Use the [V4 schema](/api/schemas/v4-schema) when:
+
+- You need HSN-wise tax reconciliation
+- Invoices have complex discount structures
+- You need separate CGST/SGST/IGST amounts
+- Accuracy and audit compliance are critical
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="OCR Structured Endpoint" icon="code" href="/api/ocr-structured">
+    Use this schema with the structured API endpoint
+  </Card>
+  <Card title="V4 Schema" icon="file-invoice" href="/api/schemas/v4-schema">
+    Alternative normalized schema with advanced reconciliation
+  </Card>
+  <Card title="Request Formats" icon="envelope" href="/api/schemas/request-formats">
+    Learn how to format API requests
+  </Card>
+  <Card title="Understanding Reconciliation" icon="scale-balanced" href="/guides/understanding-reconciliation">
+    How reconciliation works for both schemas
+  </Card>
+</CardGroup>

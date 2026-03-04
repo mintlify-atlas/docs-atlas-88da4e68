@@ -1,0 +1,447 @@
+---
+title: "V4 schema"
+description: "Complete type definitions for the normalized India GST invoice schema"
+---
+
+The V4 schema represents the normalized India GST invoice format returned by `/api/ocr-structured-v4`. This schema is designed for the Indian GST ecosystem with support for CGST/SGST/IGST tax splits, HSN codes, and reconciliation.
+
+## V4Doc Type
+
+The top-level document structure returned by the v4 endpoint.
+
+<ResponseField name="doc_level" type="object" required>
+  Document-level metadata
+  
+  <Expandable title="properties">
+    <ResponseField name="supplier_name" type="string">
+      Supplier/seller name from the invoice
+    </ResponseField>
+    
+    <ResponseField name="supplier_gstin" type="string">
+      Supplier's 15-character GSTIN (e.g., "29AABCU9603R1Z5")
+    </ResponseField>
+    
+    <ResponseField name="invoice_number" type="string">
+      Invoice number or document reference
+    </ResponseField>
+    
+    <ResponseField name="invoice_date" type="string">
+      Invoice date in YYYY-MM-DD format
+    </ResponseField>
+    
+    <ResponseField name="place_of_supply_state_code" type="string">
+      2-digit state code for place of supply (e.g., "29" for Karnataka)
+    </ResponseField>
+    
+    <ResponseField name="buyer_gstin" type="string">
+      Buyer's 15-character GSTIN
+    </ResponseField>
+    
+    <ResponseField name="currency" type="string">
+      Currency code (typically "INR")
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="items" type="V4Item[]" required>
+  Array of line items extracted from the invoice. See [V4Item schema](#v4item-type) below.
+</ResponseField>
+
+<ResponseField name="header_discounts" type="object[]">
+  Document-level discounts applied before line-item totals
+  
+  <Expandable title="properties">
+    <ResponseField name="label" type="string">
+      Discount label (e.g., "Trade Discount", "Special Discount")
+    </ResponseField>
+    
+    <ResponseField name="type" type="enum">
+      Either "PERCENT" or "ABSOLUTE"
+    </ResponseField>
+    
+    <ResponseField name="value" type="number">
+      Discount value (percentage 0-100 or absolute amount)
+    </ResponseField>
+    
+    <ResponseField name="order" type="number">
+      Application order for sequential discounts
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="charges" type="object[]">
+  Additional charges like shipping, handling, packing
+  
+  <Expandable title="properties">
+    <ResponseField name="label" type="string">
+      Charge label (e.g., "Freight", "Packing Charges")
+    </ResponseField>
+    
+    <ResponseField name="ex_tax" type="number">
+      Charge amount excluding GST
+    </ResponseField>
+    
+    <ResponseField name="gst_rate_hint" type="number | null">
+      GST rate percentage if applicable
+    </ResponseField>
+    
+    <ResponseField name="gst_amount" type="number">
+      GST amount on this charge
+    </ResponseField>
+    
+    <ResponseField name="inc_tax" type="number">
+      Total charge including GST
+    </ResponseField>
+    
+    <ResponseField name="taxable" type="boolean">
+      Whether this charge is subject to GST
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="tcs" type="object">
+  Tax Collected at Source information
+  
+  <Expandable title="properties">
+    <ResponseField name="rate" type="number">
+      TCS rate percentage
+    </ResponseField>
+    
+    <ResponseField name="amount" type="number">
+      TCS amount collected
+    </ResponseField>
+    
+    <ResponseField name="base_used" type="string">
+      Description of the base amount TCS was calculated on
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="round_off" type="number">
+  Round-off adjustment to arrive at final grand total
+</ResponseField>
+
+<ResponseField name="totals" type="object" required>
+  Computed totals after reconciliation
+  
+  <Expandable title="properties">
+    <ResponseField name="items_ex_tax" type="number">
+      Sum of all line items excluding tax and after discounts
+    </ResponseField>
+    
+    <ResponseField name="header_discounts_ex_tax" type="number">
+      Total header-level discount amount
+    </ResponseField>
+    
+    <ResponseField name="charges_ex_tax" type="number">
+      Sum of additional charges excluding tax
+    </ResponseField>
+    
+    <ResponseField name="taxable_ex_tax" type="number">
+      Total taxable amount before GST
+    </ResponseField>
+    
+    <ResponseField name="gst_total" type="number">
+      Total GST amount (CGST + SGST + IGST)
+    </ResponseField>
+    
+    <ResponseField name="grand_total" type="number">
+      Final invoice total including all taxes and charges
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="printed" type="object">
+  Anchor values printed on the invoice for reconciliation
+  
+  <Expandable title="properties">
+    <ResponseField name="taxable_subtotal" type="number | null">
+      Taxable subtotal printed on invoice
+    </ResponseField>
+    
+    <ResponseField name="gst_total" type="number | null">
+      Total GST amount printed on invoice
+    </ResponseField>
+    
+    <ResponseField name="hsn_tax_table" type="array">
+      HSN-wise tax breakup table if present
+    </ResponseField>
+    
+    <ResponseField name="grand_total" type="number | null">
+      Grand total printed on invoice
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="reconciliation" type="object" required>
+  Reconciliation results and diagnostics
+  
+  <Expandable title="properties">
+    <ResponseField name="error_absolute" type="number">
+      Absolute difference between computed and printed grand total. Values ≤ ₹0.05 indicate successful reconciliation.
+    </ResponseField>
+    
+    <ResponseField name="alternates_considered" type="string[]">
+      List of candidate hypotheses tested during reconciliation
+    </ResponseField>
+    
+    <ResponseField name="warnings" type="string[]">
+      Any warnings or issues encountered during reconciliation
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Metadata about the extraction process
+  
+  <Expandable title="properties">
+    <ResponseField name="pages_processed" type="number">
+      Number of pages processed
+    </ResponseField>
+    
+    <ResponseField name="language" type="string">
+      Detected invoice language
+    </ResponseField>
+    
+    <ResponseField name="overall_confidence" type="number">
+      Overall confidence score (0-1)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## V4Item Type
+
+Represents a single line item on the invoice.
+
+<ResponseField name="name" type="string" required>
+  Item name or description
+</ResponseField>
+
+<ResponseField name="hsn" type="string" required>
+  HSN code (Harmonized System of Nomenclature)
+</ResponseField>
+
+<ResponseField name="qty" type="number" required>
+  Quantity
+</ResponseField>
+
+<ResponseField name="uom" type="string" required>
+  Unit of measurement (e.g., "PCS", "KGS", "BOX")
+</ResponseField>
+
+<ResponseField name="rate_ex_tax" type="number" required>
+  Unit rate excluding tax (best source determined by reconciliation)
+</ResponseField>
+
+<ResponseField name="discount" type="object" required>
+  Line-level discount information
+  
+  <Expandable title="properties">
+    <ResponseField name="d1_pct" type="number | null">
+      First discount percentage (0-100)
+    </ResponseField>
+    
+    <ResponseField name="d2_pct" type="number | null">
+      Second discount percentage (0-100)
+    </ResponseField>
+    
+    <ResponseField name="flat_per_unit" type="number | null">
+      Flat discount amount per unit
+    </ResponseField>
+    
+    <ResponseField name="effective_pct" type="number">
+      Effective combined discount percentage
+    </ResponseField>
+    
+    <ResponseField name="amount" type="number">
+      Total discount amount for this line
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="gst" type="object" required>
+  GST information for this line item
+  
+  <Expandable title="properties">
+    <ResponseField name="rate" type="number">
+      GST rate percentage (0, 5, 12, 18, 28)
+    </ResponseField>
+    
+    <ResponseField name="cgst" type="number">
+      Central GST amount (intra-state)
+    </ResponseField>
+    
+    <ResponseField name="sgst" type="number">
+      State GST amount (intra-state)
+    </ResponseField>
+    
+    <ResponseField name="igst" type="number">
+      Integrated GST amount (inter-state)
+    </ResponseField>
+    
+    <ResponseField name="amount" type="number">
+      Total GST amount (cgst + sgst + igst)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="totals" type="object" required>
+  Computed line totals
+  
+  <Expandable title="properties">
+    <ResponseField name="line_ex_tax" type="number">
+      Line total excluding tax (qty × rate_ex_tax - discount)
+    </ResponseField>
+    
+    <ResponseField name="line_inc_tax" type="number">
+      Line total including tax
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="raw" type="object">
+  Raw extraction data before reconciliation
+  
+  <Expandable title="properties">
+    <ResponseField name="rate_printed" type="number | null">
+      Rate value printed on invoice
+    </ResponseField>
+    
+    <ResponseField name="price_mode_detected" type="enum">
+      Either "WITH_TAX" or "WITHOUT_TAX"
+    </ResponseField>
+    
+    <ResponseField name="discount_pct_printed" type="number | null">
+      Discount percentage printed on invoice
+    </ResponseField>
+    
+    <ResponseField name="special_discount_pct_printed" type="number | null">
+      Special discount percentage if shown separately
+    </ResponseField>
+    
+    <ResponseField name="amount_printed" type="number | null">
+      Line amount printed on invoice
+    </ResponseField>
+    
+    <ResponseField name="amount_ex_tax_before_discount" type="number | null">
+      Amount before discounts excluding tax
+    </ResponseField>
+    
+    <ResponseField name="amount_ex_tax_after_discount" type="number | null">
+      Amount after discounts excluding tax
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="ui_hints" type="object">
+  Display hints for UI rendering (structure varies)
+</ResponseField>
+
+<ResponseField name="confidence" type="number" required>
+  Confidence score for this line item (0-1)
+</ResponseField>
+
+## Example Response
+
+```json
+{
+  "doc_level": {
+    "supplier_name": "ABC Enterprises",
+    "supplier_gstin": "29AABCU9603R1Z5",
+    "invoice_number": "INV-2024-001",
+    "invoice_date": "2024-03-01",
+    "place_of_supply_state_code": "29",
+    "buyer_gstin": "27AAPFU0939F1ZV",
+    "currency": "INR"
+  },
+  "items": [
+    {
+      "name": "Widget A",
+      "hsn": "8471",
+      "qty": 10,
+      "uom": "PCS",
+      "rate_ex_tax": 100.00,
+      "discount": {
+        "d1_pct": 10,
+        "d2_pct": null,
+        "flat_per_unit": null,
+        "effective_pct": 10.00,
+        "amount": 100.00
+      },
+      "gst": {
+        "rate": 18,
+        "cgst": 81.00,
+        "sgst": 81.00,
+        "igst": 0,
+        "amount": 162.00
+      },
+      "totals": {
+        "line_ex_tax": 900.00,
+        "line_inc_tax": 1062.00
+      },
+      "confidence": 0.95
+    }
+  ],
+  "header_discounts": [],
+  "charges": [
+    {
+      "label": "Freight",
+      "ex_tax": 50.00,
+      "gst_rate_hint": 18,
+      "gst_amount": 9.00,
+      "inc_tax": 59.00,
+      "taxable": true
+    }
+  ],
+  "tcs": {
+    "rate": 0,
+    "amount": 0,
+    "base_used": ""
+  },
+  "round_off": -0.50,
+  "totals": {
+    "items_ex_tax": 900.00,
+    "header_discounts_ex_tax": 0,
+    "charges_ex_tax": 50.00,
+    "taxable_ex_tax": 950.00,
+    "gst_total": 171.00,
+    "grand_total": 1120.50
+  },
+  "printed": {
+    "taxable_subtotal": 950.00,
+    "gst_total": 171.00,
+    "hsn_tax_table": [],
+    "grand_total": 1121.00
+  },
+  "reconciliation": {
+    "error_absolute": 0.50,
+    "alternates_considered": [
+      "Candidate 1: price_mode=WITHOUT_TAX, non_taxable_charges=include",
+      "Candidate 2: price_mode=WITH_TAX, non_taxable_charges=include"
+    ],
+    "warnings": []
+  },
+  "meta": {
+    "pages_processed": 1,
+    "language": "en",
+    "overall_confidence": 0.93
+  }
+}
+```
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="OCR Structured V4 Endpoint" icon="code" href="/api/ocr-structured-v4">
+    Use this schema with the v4 API endpoint
+  </Card>
+  <Card title="Understanding Reconciliation" icon="scale-balanced" href="/guides/understanding-reconciliation">
+    Learn how reconciliation works
+  </Card>
+  <Card title="Reconciliation Engine" icon="calculator" href="/features/reconciliation-engine">
+    Deep dive into the reconciliation algorithm
+  </Card>
+  <Card title="MyBillBook Schema" icon="file-invoice" href="/api/schemas/mybillbook-schema">
+    Alternative compact schema format
+  </Card>
+</CardGroup>

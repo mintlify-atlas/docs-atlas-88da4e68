@@ -1,0 +1,759 @@
+---
+title: 'Reconciliation Engine'
+description: 'How the V4 reconciliation engine makes invoice numbers add up using multi-pass validation and anchor matching'
+icon: 'calculator'
+---
+
+## Overview
+
+The V4 reconciliation engine (`lib/invoice_v4.ts`) transforms raw OCR output into mathematically self-consistent invoice data. It respects printed anchors (HSN tax tables, subtotals, grand total) and tries multiple interpretations to find the best match.
+
+<Note>
+  **Goal**: Take the model's structured JSON and make the numbers add up like a real invoice, with minimal error vs. the printed grand total.
+</Note>
+
+---
+
+## Core Principles
+
+<CardGroup cols={2}>
+  <Card title="Anchor-First" icon="anchor">
+    Printed values (HSN tax table, taxable subtotal, grand total) are treated as ground truth
+  </Card>
+  <Card title="Multi-Pass" icon="arrows-rotate">
+    Tests multiple price mode hypotheses (WITH_TAX, WITHOUT_TAX) and picks the best
+  </Card>
+  <Card title="Smart Allocation" icon="brain">
+    Distributes header discounts across GST buckets to match printed GST amounts
+  </Card>
+  <Card title="Tolerance-Based" icon="ruler">
+    Accepts small round-off errors (≤ ₹1.02) as valid matches
+  </Card>
+</CardGroup>
+
+---
+
+## Reconciliation Phases
+
+The `reconcileV4()` function runs in six phases:
+
+### Phase 1: Item Line Recomputation
+
+**Purpose**: Derive line-level ex-tax amounts from rate, quantity, and discounts.
+
+<Steps>
+  <Step title="Choose Best Source of Truth">
+    For each item, the engine evaluates three candidates:
+    
+    1. **Computed**: `qty × rate_ex_tax × (1 - d1%) × (1 - d2%) - flat_discount`
+    2. **Printed**: Line amount from OCR, adjusted for price mode (WITH_TAX → divide by (1 + GST%), WITHOUT_TAX → use as-is)
+    3. **Model Hint**: Explicit `amount_ex_tax_after_discount` if provided
+    
+    The engine picks the most reliable value using these heuristics:
+    - If printed amount ≈ pre-discount gross and discount exists → use computed discounted value
+    - Otherwise, prefer printed (but never exceed computed discounted value)
+    - Fallback to model hint or computed value
+  </Step>
+  
+  <Step title="Normalize GST Rate">
+    Snaps raw GST percentages to standard slabs:
+    ```typescript
+    const GST_SLABS = [0, 0.25, 3, 5, 12, 18, 28];
+    ```
+    
+    Examples:
+    - `17.8` → `18` (within 0.75 tolerance)
+    - `0.18` → `18` (auto-scale fractions)
+    - `5.1` → `5`
+  </Step>
+  
+  <Step title="Split CGST/SGST/IGST">
+    Based on supplier GSTIN and place of supply:
+    
+    ```typescript
+    const supplierState = getStateCodeFromGstin(supplier_gstin); // e.g., 27 (Maharashtra)
+    const posCode = place_of_supply_state_code; // e.g., 27
+    const isIntra = supplierState === posCode;
+    
+    if (isIntra) {
+      cgst = gst_amount / 2;
+      sgst = gst_amount / 2;
+      igst = 0;
+    } else {
+      cgst = 0;
+      sgst = 0;
+      igst = gst_amount;
+    }
+    ```
+  </Step>
+  
+  <Step title="Build GST Buckets">
+    Groups items by GST rate for bucket-level operations:
+    ```typescript
+    gstBuckets = {
+      "0": 5000.00,   // ₹5,000 @ 0%
+      "5": 2000.00,   // ₹2,000 @ 5%
+      "18": 50000.00  // ₹50,000 @ 18%
+    }
+    ```
+  </Step>
+</Steps>
+
+---
+
+### Phase 2: Header Discounts
+
+**Purpose**: Apply sequential voucher-level discounts (Trade Discount, Special Discount, etc.) before GST.
+
+<Tabs>
+  <Tab title="Percent Discounts">
+    Applied sequentially with multiplicative effect:
+    
+    ```typescript
+    // Example: 10% Trade Discount, then 5% Special Discount
+    const d1 = 10, d2 = 5;
+    const effective = d1 + d2 - (d1 * d2) / 100;
+    // = 10 + 5 - 0.5 = 14.5%
+    
+    // Applied to each bucket:
+    bucketEx["18"] = 50000 * (1 - 0.145) = 42750.00;
+    ```
+    
+    Order matters! `[10%, 5%]` ≠ `[5%, 10%]`.
+  </Tab>
+  
+  <Tab title="Absolute Discounts">
+    Distributed proportionally across buckets:
+    
+    ```typescript
+    // Example: ₹1,000 flat discount
+    const discount = 1000;
+    const totalEx = 42750; // current bucket total
+    
+    // For 18% bucket (₹42,750 out of ₹42,750):
+    const share = 42750 / 42750; // = 1.0
+    bucketEx["18"] -= discount * share; // = 41750.00
+    ```
+  </Tab>
+  
+  <Tab title="Smart Allocation (with GST target)">
+    When printed GST total is known, the engine allocates absolute discounts **greedily** to match the target:
+    
+    ```typescript
+    // Goal: Reduce base to match printed GST
+    const targetItemsGst = printedGstTotal - approxChargesGst;
+    const currentItemsGst = sum(bucketEx[rate] * rate / 100);
+    const needReduction = currentItemsGst - targetItemsGst;
+    
+    // Iteratively take from bucket closest to effective rate
+    while (remainingAmt > 0) {
+      const k = remainingW / remainingAmt; // desired rate
+      const closestBucket = findClosest(k, availableBuckets);
+      takeFromBucket(closestBucket, min(capacity, remainingAmt));
+    }
+    ```
+    
+    This ensures the GST total matches the printed value even with tricky discount structures.
+  </Tab>
+</Tabs>
+
+---
+
+### Phase 3: Printed Anchors
+
+**Purpose**: Scale items to match printed taxable values when available.
+
+<AccordionGroup>
+  <Accordion title="Scenario A: HSN Tax Table Exists">
+    **Best case**: Invoice includes a detailed HSN-wise tax breakdown.
+    
+    ```json
+    "hsn_tax_table": [
+      {
+        "hsn": "8471",
+        "taxable_value": 42750.00,
+        "cgst_rate": 9,
+        "sgst_rate": 9,
+        "cgst_amount": 3847.50,
+        "sgst_amount": 3847.50
+      }
+    ]
+    ```
+    
+    The engine:
+    1. Groups table rows by total GST rate (e.g., 9% + 9% = 18%)
+    2. Scales item lines within each bucket to match printed taxable value exactly:
+       ```typescript
+       const printed = 42750.00;
+       const computed = 40000.00;
+       const scale = printed / computed; // 1.06875
+       
+       // Scale all items @ 18%:
+       item1.line_ex_tax *= scale;
+       item2.line_ex_tax *= scale;
+       ```
+    3. Recomputes discounts, GST, totals to maintain consistency
+    
+    <Tip>
+      HSN table anchoring is the **most accurate** method. It eliminates cumulative rounding errors and handles multi-discount structures gracefully.
+    </Tip>
+  </Accordion>
+  
+  <Accordion title="Scenario B: Printed Taxable Subtotal Only">
+    **Fallback**: Invoice prints "Total Taxable Value" without per-HSN breakdown.
+    
+    ```json
+    "printed": {
+      "taxable_subtotal": 43250.00,
+      "gst_total": 7785.00
+    }
+    ```
+    
+    The engine:
+    1. Estimates whether `taxable_subtotal` includes taxable charges:
+       - If charges exist → `targetItemsOnly = taxable_subtotal - charges_ex_tax`
+       - Else → `targetItemsOnly = taxable_subtotal`
+    2. Computes reduction needed: `cut = current_items_ex_tax - targetItemsOnly`
+    3. Uses **smart allocation** (greedy bucket selection) guided by printed GST total
+    
+    ```typescript
+    const approxChargesGst = charges.reduce((s, c) => {
+      const rate = c.gst_rate_hint || weightedAvgRate;
+      return s + c.ex_tax * (rate / 100);
+    }, 0);
+    const targetItemsGst = printedGstTotal - approxChargesGst;
+    
+    allocateAbsoluteSmart(cut, targetItemsGst);
+    ```
+  </Accordion>
+  
+  <Accordion title="Scenario C: No Anchors">
+    **Rare**: No printed taxable subtotal or HSN table.
+    
+    The engine skips anchor adjustments and relies on:
+    - Line-level printed amounts (if price mode is WITHOUT_TAX)
+    - Computed values from rate × qty × discounts
+    - Final grand total matching via round-off
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### Phase 4: Charges
+
+**Purpose**: Add freight, packing, insurance, etc. with inferred GST when needed.
+
+```typescript
+charges.forEach(charge => {
+  const ex = charge.ex_tax;
+  const rate = charge.gst_rate_hint || weightedAvgItemGstRate;
+  const gst = ex * (rate / 100);
+  const inc = ex + gst;
+  
+  if (charge.taxable) {
+    chargesEx += ex;
+    // Add to GST bucket for proper subtotal computation
+    bucketEx[String(rate)] = (bucketEx[String(rate)] || 0) + ex;
+  } else {
+    // Non-taxable charge (e.g., late fee)
+    nonTaxableChargesEx += ex;
+  }
+});
+```
+
+<Note>
+  If `gst_rate_hint` is missing, the engine uses the **weighted average GST rate** from items:
+  ```typescript
+  const totalEx = items.reduce((s, i) => s + i.totals.line_ex_tax, 0);
+  const totalGst = items.reduce((s, i) => s + i.gst.amount, 0);
+  const weightedRate = (totalGst / totalEx) * 100;
+  ```
+</Note>
+
+---
+
+### Phase 5: Totals & TCS
+
+**Purpose**: Compute final taxable, GST, and grand totals.
+
+<Steps>
+  <Step title="Decide Non-Taxable Charges Inclusion">
+    Some invoices include non-taxable charges (e.g., late fees) in the grand total, others don't.
+    
+    The engine tests both options and picks the one with lower error:
+    ```typescript
+    const includeMode = {
+      taxable_ex: items + charges + nonTaxableCharges,
+      grand: taxable_ex + gst + tcs + round_off
+    };
+    const excludeMode = {
+      taxable_ex: items + charges,
+      grand: taxable_ex + gst + tcs + round_off
+    };
+    
+    const bestMode = Math.abs(includeMode.grand - printedGrand) <
+                     Math.abs(excludeMode.grand - printedGrand)
+                     ? 'include' : 'exclude';
+    ```
+  </Step>
+  
+  <Step title="Compute GST by Bucket">
+    Ensures GST matches per-rate subtotals:
+    ```typescript
+    let gstTotal = 0;
+    for (const [rateStr, ex] of Object.entries(bucketEx)) {
+      const rate = parseFloat(rateStr);
+      gstTotal += ex * (rate / 100);
+    }
+    gstTotal = Math.round(gstTotal * 100) / 100;
+    ```
+  </Step>
+  
+  <Step title="Apply TCS (if present)">
+    Tax Collected at Source, applied after GST:
+    ```typescript
+    const grandBeforeTcs = taxable_ex + gstTotal;
+    const tcsAmount = tcs.rate > 0
+      ? grandBeforeTcs * (tcs.rate / 100)
+      : tcs.amount;
+    const grandAfterTcs = grandBeforeTcs + tcsAmount;
+    ```
+  </Step>
+  
+  <Step title="Add Round-Off">
+    Final adjustment to match printed total:
+    ```typescript
+    const finalGrand = grandAfterTcs + round_off;
+    const error = Math.abs(finalGrand - printedGrand);
+    ```
+    
+    <Warning>
+      The engine **does NOT force round-off** to zero error. It respects the provided `round_off` value and reports the error. This prevents hiding genuine extraction issues.
+    </Warning>
+  </Step>
+</Steps>
+
+---
+
+### Phase 6: Multi-Hypothesis Testing
+
+**Purpose**: Try multiple interpretations and pick the best match.
+
+The `reconcileV4()` function tests four scenarios:
+
+```typescript
+const candidates = [
+  { name: "as_is", doc: recomputeDoc(input) },
+  { name: "as_is_items_only_when_no_hsn", doc: recomputeDoc(input, { preferItemsOnlyWhenNoHSN: true }) },
+  { name: "from_printed_with_tax", doc: rerateFromPrinted(input, "WITH_TAX") },
+  { name: "from_printed_without_tax", doc: rerateFromPrinted(input, "WITHOUT_TAX") }
+];
+```
+
+<Accordion title="Candidate 1: as_is">
+  Uses `rate_ex_tax` and price mode hints from the model as-is.
+  
+  Best for: Invoices where the model correctly identified ex-tax rates.
+</Accordion>
+
+<Accordion title="Candidate 2: as_is_items_only_when_no_hsn">
+  When no HSN table exists, assumes printed taxable subtotal = items only (excludes taxable charges).
+  
+  Best for: Invoices that print "Taxable Value" before "Add: Freight" line.
+</Accordion>
+
+<Accordion title="Candidate 3: from_printed_with_tax">
+  Reinterprets printed per-unit rate as **including GST**:
+  ```typescript
+  const rate_ex_tax = rate_printed / (1 + gst_rate / 100);
+  ```
+  
+  Best for: Retail invoices where MRP/selling price includes GST.
+</Accordion>
+
+<Accordion title="Candidate 4: from_printed_without_tax">
+  Treats printed rate as ex-tax directly:
+  ```typescript
+  const rate_ex_tax = rate_printed;
+  ```
+  
+  Best for: B2B invoices with clear "Rate" and "GST" columns.
+</Accordion>
+
+The engine scores each candidate by:
+```typescript
+const score = error_absolute + max(0, Math.abs(implied_round_off) - 1);
+```
+
+Penalizes:
+- High absolute error vs. printed grand total
+- Large round-off values (> ₹1.00)
+
+Picks the candidate with the **lowest score**.
+
+---
+
+## Tolerance Levels
+
+<table>
+  <thead>
+    <tr>
+      <th>Tolerance Type</th>
+      <th>Value</th>
+      <th>Purpose</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>**Line Matching**</td>
+      <td>₹0.05</td>
+      <td>Float precision tolerance when comparing printed vs. computed line amounts</td>
+    </tr>
+    <tr>
+      <td>**GST Slab Snapping**</td>
+      <td>0.75%</td>
+      <td>Snap to nearest standard slab if within tolerance (e.g., 17.8% → 18%)</td>
+    </tr>
+    <tr>
+      <td>**HSN Table Scaling**</td>
+      <td>₹0.75</td>
+      <td>Scale printed bucket totals to match taxable subtotal if difference > threshold</td>
+    </tr>
+    <tr>
+      <td>**Acceptable Round-Off**</td>
+      <td>≤ ₹1.02</td>
+      <td>Maximum round-off automatically adopted during reconciliation</td>
+    </tr>
+    <tr>
+      <td>**Matched Status**</td>
+      <td>≤ ₹0.05</td>
+      <td>Error threshold for `reconciliation.status = "matched"`</td>
+    </tr>
+  </tbody>
+</table>
+
+<Tip>
+  These tolerances are **conservative** by design. If your domain requires stricter matching, consider validating `error_absolute < 0.01` in your application layer.
+</Tip>
+
+---
+
+## Validation Logic
+
+The reconciliation engine exposes detailed metadata for validation:
+
+### 1. Error Absolute
+
+```typescript
+const doc = reconcileV4(input);
+
+if (doc.reconciliation.error_absolute <= 0.05) {
+  // Perfect or near-perfect match
+  return { status: 'valid', confidence: 'high' };
+} else if (doc.reconciliation.error_absolute <= 1.00) {
+  // Acceptable, likely rounding differences
+  return { status: 'valid', confidence: 'medium', warning: 'Minor discrepancy' };
+} else {
+  // Requires review
+  return { status: 'review_required', confidence: 'low', error: doc.reconciliation.error_absolute };
+}
+```
+
+### 2. Alternates Considered
+
+Use this to debug why a specific interpretation was chosen:
+
+```typescript
+console.log(doc.reconciliation.alternates_considered);
+// [
+//   "as_is:err=0.00,implied_round=0.00,score=0.00",
+//   "as_is_items_only_when_no_hsn:err=125.50,implied_round=0.00,score=125.50",
+//   "from_printed_with_tax:err=2500.00,implied_round=2500.00,score=5000.00",
+//   "from_printed_without_tax:err=0.50,implied_round=0.50,score=1.00"
+// ]
+
+// The first one (score=0.00) was chosen
+```
+
+### 3. Warnings
+
+Check for special cases:
+
+```typescript
+if (doc.reconciliation.warnings.length > 0) {
+  doc.reconciliation.warnings.forEach(w => {
+    if (w.includes('Excluded non-taxable charges')) {
+      // Non-taxable charges were not included in totals
+      // Verify this matches invoice layout
+    }
+  });
+}
+```
+
+---
+
+## Real-World Examples
+
+<Tabs>
+  <Tab title="Perfect Match">
+    ```json
+    {
+      "totals": {
+        "items_ex_tax": 50000.00,
+        "header_discounts_ex_tax": 5000.00,
+        "charges_ex_tax": 500.00,
+        "taxable_ex_tax": 45500.00,
+        "gst_total": 8190.00,
+        "grand_total": 53690.00
+      },
+      "printed": {
+        "taxable_subtotal": 45500.00,
+        "gst_total": 8190.00,
+        "grand_total": 53690.00
+      },
+      "reconciliation": {
+        "error_absolute": 0.00,
+        "alternates_considered": [
+          "as_is:err=0.00,implied_round=0.00,score=0.00"
+        ],
+        "warnings": []
+      }
+    }
+    ```
+    
+    ✅ All anchors match, zero error, no warnings.
+  </Tab>
+  
+  <Tab title="HSN Scaling">
+    ```json
+    {
+      "items": [
+        {
+          "name": "Item A",
+          "totals": { "line_ex_tax": 22750.00 }, // Scaled from 25000
+          "gst": { "rate": 18, "amount": 4095.00 }
+        },
+        {
+          "name": "Item B",
+          "totals": { "line_ex_tax": 22750.00 }, // Scaled from 25000
+          "gst": { "rate": 18, "amount": 4095.00 }
+        }
+      ],
+      "printed": {
+        "hsn_tax_table": [
+          {
+            "hsn": "8471",
+            "taxable_value": 45500.00,
+            "cgst_rate": 9,
+            "sgst_rate": 9,
+            "cgst_amount": 4095.00,
+            "sgst_amount": 4095.00
+          }
+        ]
+      },
+      "reconciliation": {
+        "error_absolute": 0.00,
+        "warnings": []
+      }
+    }
+    ```
+    
+    ✅ Items were scaled down by `45500 / 50000 = 0.91` to match HSN table.
+  </Tab>
+  
+  <Tab title="With Minor Error">
+    ```json
+    {
+      "totals": {
+        "grand_total": 53690.50
+      },
+      "printed": {
+        "grand_total": 53690.00
+      },
+      "round_off": 0.00,
+      "reconciliation": {
+        "error_absolute": 0.50,
+        "alternates_considered": [
+          "as_is:err=0.50,implied_round=0.50,score=1.00",
+          "from_printed_without_tax:err=0.00,implied_round=0.00,score=0.00"
+        ]
+      }
+    }
+    ```
+    
+    ⚠️ Small error, but `from_printed_without_tax` candidate matched perfectly and was chosen.
+  </Tab>
+  
+  <Tab title="Requires Review">
+    ```json
+    {
+      "totals": {
+        "grand_total": 54200.00
+      },
+      "printed": {
+        "grand_total": 53690.00
+      },
+      "reconciliation": {
+        "error_absolute": 510.00,
+        "alternates_considered": [
+          "as_is:err=510.00,implied_round=510.00,score=1020.00",
+          "from_printed_with_tax:err=125.50,implied_round=125.50,score=251.00",
+          "from_printed_without_tax:err=510.00,implied_round=510.00,score=1020.00"
+        ],
+        "warnings": []
+      }
+    }
+    ```
+    
+    ❌ Large error even after trying all candidates. Possible causes:
+    - Missing charges in OCR output
+    - Incorrect discount interpretation
+    - Multi-page invoice with items on different pages
+  </Tab>
+</Tabs>
+
+---
+
+## Integration Guide
+
+### Step 1: Call the API
+
+```typescript
+const response = await fetch('/api/ocr-structured-v4', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    pdfBase64: pdfData,
+    filename: 'invoice.pdf'
+  })
+});
+
+const doc: V4Doc = await response.json();
+```
+
+### Step 2: Validate Reconciliation
+
+```typescript
+function validateInvoice(doc: V4Doc): ValidationResult {
+  const { error_absolute, warnings } = doc.reconciliation;
+  
+  if (error_absolute <= 0.05) {
+    return {
+      status: 'approved',
+      confidence: 'high',
+      message: 'All numbers match'
+    };
+  }
+  
+  if (error_absolute <= 1.00) {
+    return {
+      status: 'approved',
+      confidence: 'medium',
+      message: 'Minor rounding difference',
+      warning: `Error: ₹${error_absolute.toFixed(2)}`
+    };
+  }
+  
+  return {
+    status: 'review_required',
+    confidence: 'low',
+    message: 'Significant discrepancy detected',
+    error: `₹${error_absolute.toFixed(2)}`,
+    details: warnings
+  };
+}
+```
+
+### Step 3: Handle Edge Cases
+
+```typescript
+// Check for non-taxable charge exclusions
+if (doc.reconciliation.warnings.some(w => w.includes('non-taxable charges'))) {
+  // Verify against invoice layout
+  const layoutHasChargesInTotal = checkInvoiceLayout(doc);
+  if (!layoutHasChargesInTotal) {
+    // Expected behavior, no action needed
+  } else {
+    // Flag for manual review
+    flagForReview(doc, 'Charges exclusion mismatch');
+  }
+}
+
+// Check alternate hypotheses
+const alternates = doc.reconciliation.alternates_considered;
+const scores = alternates.map(a => {
+  const match = a.match(/score=([\d.]+)/);
+  return match ? parseFloat(match[1]) : Infinity;
+});
+
+if (Math.min(...scores) > 50) {
+  // All hypotheses had high errors
+  flagForReview(doc, 'No good hypothesis found');
+}
+```
+
+---
+
+## Debugging Tips
+
+<AccordionGroup>
+  <Accordion title="Large Error (> ₹10)">
+    **Common causes**:
+    1. Missing items on subsequent pages (multi-page PDF)
+    2. Charges not extracted (Freight, Packing)
+    3. TCS not detected
+    
+    **Debug steps**:
+    1. Check `meta.pages_processed` — should match PDF page count
+    2. Compare `totals.items_ex_tax` with printed subtotal
+    3. Look for charge keywords in raw OCR output
+    4. Verify TCS line if invoice mentions "TCS"
+  </Accordion>
+  
+  <Accordion title="GST Mismatch">
+    **Common causes**:
+    1. CGST/SGST vs. IGST confusion
+    2. Charges using wrong GST rate
+    3. HSN table not detected
+    
+    **Debug steps**:
+    1. Check `gst.cgst + gst.sgst + gst.igst` per item
+    2. Verify `doc_level.place_of_supply_state_code` matches supplier state for intra-state
+    3. Look at `printed.hsn_tax_table` — should be non-empty if table exists
+  </Accordion>
+  
+  <Accordion title="Round-Off > ₹1">
+    **Common causes**:
+    1. Incorrect price mode (WITH_TAX vs. WITHOUT_TAX)
+    2. Sequential discounts not captured
+    3. Printed subtotal includes/excludes charges ambiguity
+    
+    **Debug steps**:
+    1. Check `alternates_considered` — if `from_printed_with_tax` has lower error, price mode might be wrong
+    2. Verify `header_discounts` array — should have all printed discounts with correct `order`
+    3. Review `charges[].taxable` — might need manual override
+  </Accordion>
+  
+  <Accordion title="Use the Review Tool">
+    Navigate to `/review` in the UI and paste the LangFuse trace or API response.
+    
+    The tool will:
+    - Auto-detect invoice objects in nested JSON
+    - Display reconciliation breakdown with color-coded errors
+    - Show line-by-line math (qty × rate, discounts, tax)
+    - Highlight which candidate was chosen and why
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Related Topics
+
+<CardGroup cols={2}>
+  <Card title="OCR Modes" icon="layer-group" href="/features/ocr-modes">
+    Compare Raw, Structured, and V4 modes
+  </Card>
+  <Card title="Review Tool" icon="microscope" href="/features/review-tool">
+    Debug reconciliation with the LangFuse review interface
+  </Card>
+</CardGroup>

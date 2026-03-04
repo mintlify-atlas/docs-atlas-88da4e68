@@ -1,0 +1,307 @@
+---
+title: 'Code Style Guide'
+description: 'TypeScript style, naming conventions, and linting rules for Invoice OCR'
+---
+
+## TypeScript
+
+### Strict Mode
+
+The project uses TypeScript strict mode. All code must:
+
+- Have explicit types for function parameters and return values
+- Avoid `any` types unless absolutely necessary
+- Handle null/undefined cases properly
+- Use type guards for runtime type checking
+
+### Functional Components
+
+Prefer functional React components over class components:
+
+```tsx
+// Good
+export function InvoiceViewer({ data }: InvoiceViewerProps) {
+  return <div>{/* ... */}</div>
+}
+
+// Avoid
+export class InvoiceViewer extends React.Component<InvoiceViewerProps> {
+  render() {
+    return <div>{/* ... */}</div>
+  }
+}
+```
+
+## Naming Conventions
+
+### Files
+
+Use **kebab-case** for all filenames:
+
+```
+invoice-viewer-v4.tsx
+ocr-uploader.tsx
+invoice_v4.ts
+standards.test.ts
+```
+
+### Components
+
+Use **PascalCase** for exported component names:
+
+```tsx
+// File: invoice-viewer-v4.tsx
+export function InvoiceViewerV4() {
+  // ...
+}
+```
+
+### Variables and Functions
+
+Use **camelCase** for variables and function names:
+
+```typescript
+const invoiceTotal = calculateTotal(lineItems)
+const isValidGST = validateGSTNumber(gstNumber)
+```
+
+### Constants
+
+Use **SCREAMING_SNAKE_CASE** for constants:
+
+```typescript
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+const DEFAULT_PDF_ENGINE = 'pdf-text'
+```
+
+### Types and Interfaces
+
+Use **PascalCase** for type and interface names:
+
+```typescript
+interface InvoiceData {
+  invoiceNumber: string
+  total: number
+}
+
+type OCRResponse = {
+  text: string
+  confidence: number
+}
+```
+
+## Imports
+
+### Path Aliases
+
+Use the `@/` alias for repo-root paths:
+
+```typescript
+// Good
+import { reconcileInvoice } from '@/lib/invoice_v4'
+import { Button } from '@/components/ui/button'
+import OCRUploader from '@/components/ocr-uploader'
+
+// Avoid
+import { reconcileInvoice } from '../../lib/invoice_v4'
+import { Button } from '../ui/button'
+```
+
+### Import Order
+
+Organize imports in this order:
+
+1. External dependencies (React, Next.js, etc.)
+2. Internal components and utilities
+3. Types and interfaces
+4. Styles
+
+```typescript
+import { useState } from 'react'
+import Image from 'next/image'
+
+import { Button } from '@/components/ui/button'
+import { reconcileInvoice } from '@/lib/invoice_v4'
+
+import type { InvoiceData } from '@/lib/types'
+```
+
+## Styling
+
+### Tailwind CSS
+
+Use **Tailwind CSS v4 utility classes** for all styling:
+
+```tsx
+// Good
+<div className="flex items-center gap-4 rounded-lg border p-4">
+  <span className="text-sm font-medium">Invoice Total</span>
+</div>
+
+// Avoid custom CSS unless absolutely necessary
+<div className="custom-invoice-container">
+  {/* ... */}
+</div>
+```
+
+### Shared UI Components
+
+Reuse components from `components/ui/*` (shadcn/ui):
+
+```tsx
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+
+<Card>
+  <CardHeader>Invoice Details</CardHeader>
+  <CardContent>
+    <Input placeholder="Invoice number" />
+    <Button>Submit</Button>
+  </CardContent>
+</Card>
+```
+
+### Conditional Classes
+
+Use utility libraries like `clsx` or `cn` for conditional classes:
+
+```tsx
+import { cn } from '@/lib/utils'
+
+<div
+  className={cn(
+    'rounded-lg border p-4',
+    isError && 'border-red-500 bg-red-50',
+    isSuccess && 'border-green-500 bg-green-50'
+  )}
+>
+  {/* ... */}
+</div>
+```
+
+## Linting
+
+### ESLint Configuration
+
+The project uses ESLint with `next/core-web-vitals` rules:
+
+```javascript
+// eslint.config.mjs
+import { dirname } from "path"
+import { fileURLToPath } from "url"
+import { FlatCompat } from "@eslint/eslintrc"
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+
+const compat = new FlatCompat({
+  baseDirectory: __dirname,
+})
+
+const eslintConfig = [
+  ...compat.extends("next/core-web-vitals", "next/typescript"),
+]
+
+export default eslintConfig
+```
+
+### Running the Linter
+
+```bash
+npm run lint        # Check for errors
+npm run lint -- --fix  # Auto-fix issues
+```
+
+### Pre-commit Requirements
+
+**Fix all lint errors before committing**. Common issues:
+
+- Unused variables or imports
+- Missing dependencies in `useEffect`
+- Incorrect Hook usage
+- Type errors
+
+## Project Structure
+
+### Directory Organization
+
+```
+├── app/                    # Next.js App Router
+│   ├── api/               # API routes
+│   │   ├── ocr/
+│   │   ├── ocr-structured/
+│   │   └── ocr-structured-v4/
+│   ├── page.tsx           # Main upload page
+│   ├── review/page.tsx    # JSON review tool
+│   ├── layout.tsx         # Root layout
+│   └── globals.css        # Global styles
+├── components/            # React components
+│   ├── ocr-uploader.tsx
+│   ├── invoice-viewer.tsx
+│   ├── invoice-viewer-v4.tsx
+│   └── ui/*              # shadcn/ui components
+├── lib/                   # Business logic
+│   ├── __tests__/        # Test files
+│   ├── invoice.ts        # Compact schema
+│   ├── invoice_v4.ts     # v4 reconciliation
+│   └── utils.ts          # Utilities
+└── public/               # Static assets
+```
+
+### Module Organization
+
+- **`app/`**: Next.js pages, layouts, and API routes
+- **`components/`**: Reusable UI and feature components
+- **`lib/`**: Business logic, utilities, and tests
+- **`public/`**: Static files (images, fonts, etc.)
+
+## Best Practices
+
+### Error Handling
+
+Always handle errors gracefully:
+
+```typescript
+try {
+  const result = await processInvoice(data)
+  return result
+} catch (error) {
+  console.error('Invoice processing failed:', error)
+  throw new Error('Failed to process invoice')
+}
+```
+
+### Type Safety
+
+Define clear interfaces for data structures:
+
+```typescript
+interface LineItem {
+  description: string
+  quantity: number
+  rate: number
+  amount: number
+}
+
+interface Invoice {
+  invoiceNumber: string
+  date: string
+  lineItems: LineItem[]
+  total: number
+}
+```
+
+### Comments
+
+Write comments for complex logic, not obvious code:
+
+```typescript
+// Good: Explains WHY
+// Reconcile totals to account for floating-point rounding errors
+const tolerance = 0.05
+
+// Bad: States WHAT (obvious from code)
+// Add line items together
+const sum = lineItems.reduce((acc, item) => acc + item.amount, 0)
+```

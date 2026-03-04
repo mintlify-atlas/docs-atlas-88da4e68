@@ -1,0 +1,198 @@
+---
+title: Running Tests
+description: Commands and workflows for running tests in Invoice OCR
+---
+
+Invoice OCR provides three npm scripts for running tests with Vitest.
+
+## Test Commands
+
+### Watch Mode
+
+Run tests continuously, re-running on file changes:
+
+```bash
+npm test
+```
+
+This is the primary command for active development. Vitest will:
+
+- Watch for changes in test files and source files
+- Re-run affected tests automatically
+- Display results in the terminal
+- Provide interactive filtering options
+
+### Single Run
+
+Run all tests once and exit:
+
+```bash
+npm run test:run
+```
+
+Use this command for:
+
+- CI/CD pipelines
+- Pre-commit checks
+- Verifying all tests pass before deployment
+
+### Coverage Report
+
+Run tests with code coverage analysis:
+
+```bash
+npm run test:coverage
+```
+
+This command:
+
+- Runs all tests once
+- Generates coverage data using V8 provider
+- Outputs coverage report in three formats:
+  - **Text**: Console output with coverage percentages
+  - **JSON**: Machine-readable coverage data
+  - **HTML**: Interactive browser-based report
+
+## Coverage Output
+
+### Terminal Report
+
+The text reporter displays coverage in the terminal:
+
+```bash
+--------------------|---------|----------|---------|---------|-------------------
+File                | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+--------------------|---------|----------|---------|---------|-------------------
+All files           |   85.23 |    78.45 |   90.12 |   84.67 |
+lib/                |   85.23 |    78.45 |   90.12 |   84.67 |
+  invoice.ts        |   82.34 |    75.23 |   88.89 |   81.56 | 45-52,78-82
+  invoice_v4.ts     |   88.12 |    81.67 |   91.35 |   87.89 | 123-125,234
+  standards.ts      |  100.00 |   100.00 |  100.00 |  100.00 |
+  utils.ts          |   65.43 |    54.32 |   75.00 |   64.21 | 12-34,67-89
+--------------------|---------|----------|---------|---------|-------------------
+```
+
+### HTML Report
+
+The HTML report is generated in the `coverage/` directory:
+
+```bash
+open coverage/index.html  # macOS
+xdg-open coverage/index.html  # Linux
+start coverage/index.html  # Windows
+```
+
+The interactive report allows you to:
+
+- Browse coverage by file
+- See line-by-line coverage highlighting
+- Identify untested code paths
+- Track coverage trends over time
+
+## Watch Mode Features
+
+### Interactive Filtering
+
+When running in watch mode, Vitest provides keyboard shortcuts:
+
+- `a` - Run all tests
+- `f` - Run only failed tests
+- `p` - Filter by test name pattern
+- `t` - Filter by test file pattern
+- `q` - Quit watch mode
+
+### Example Session
+
+```bash
+$ npm test
+
+> invoice-ocr@0.1.0 test
+> vitest
+
+ ✓ lib/__tests__/standards.test.ts (163 tests) 234ms
+ ✓ lib/__tests__/invoice_v4.test.ts (89 tests) 456ms
+
+Test Files  2 passed (2)
+     Tests  252 passed (252)
+  Start at  14:23:45
+  Duration  690ms
+
+WATCH mode enabled. Watching for file changes...
+press h to show help, press q to quit
+```
+
+## CI/CD Integration
+
+For continuous integration, use the single-run command:
+
+```yaml title=".github/workflows/test.yml"
+name: Test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+      - run: npm run test:run
+```
+
+## Debugging Tests
+
+### Isolate Tests
+
+Use `.only` to run a single test:
+
+```typescript
+it.only('should calculate correctly', () => {
+  // This test runs exclusively
+})
+```
+
+### Skip Tests
+
+Use `.skip` to temporarily disable tests:
+
+```typescript
+it.skip('should handle edge case', () => {
+  // This test is skipped
+})
+```
+
+### Verbose Output
+
+For detailed test output, use the `--reporter=verbose` flag:
+
+```bash
+npm test -- --reporter=verbose
+```
+
+## Performance Tips
+
+### Run Specific Files
+
+Run tests for a specific file:
+
+```bash
+npm test -- lib/__tests__/standards.test.ts
+```
+
+### Run Tests Matching Pattern
+
+Run tests with names matching a pattern:
+
+```bash
+npm test -- -t "GST rate"
+```
+
+This runs only tests whose description contains "GST rate".
+
+## Related
+
+- [Testing Overview](/development/testing/overview) - Strategy and setup
+- [Writing Tests](/development/testing/writing-tests) - Guidelines and examples

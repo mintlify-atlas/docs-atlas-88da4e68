@@ -1,0 +1,371 @@
+---
+title: "Request formats"
+description: "All supported request formats for Invoice OCR API endpoints"
+---
+
+Invoice OCR supports multiple input formats for both images and PDFs. This page documents all supported request body structures across the API endpoints.
+
+## Image Requests
+
+### Base64 Encoded Image
+
+The most common format for uploading images directly from client applications.
+
+<ParamField path="imageBase64" type="string" required>
+  Image data as a base64-encoded string or data URL
+</ParamField>
+
+<ParamField path="mimeType" type="string">
+  MIME type of the image (e.g., "image/png", "image/jpeg"). Defaults to "image/png" if omitted.
+</ParamField>
+
+<Tabs>
+  <Tab title="cURL">
+    ```bash
+    curl -X POST http://localhost:3000/api/ocr-structured-v4 \
+      -H "Content-Type: application/json" \
+      -d '{
+        "imageBase64": "iVBORw0KGgoAAAANSUhEUgAA...",
+        "mimeType": "image/png"
+      }'
+    ```
+  </Tab>
+  
+  <Tab title="JavaScript">
+    ```javascript
+    const response = await fetch('/api/ocr-structured-v4', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: 'iVBORw0KGgoAAAANSUhEUgAA...',
+        mimeType: 'image/png'
+      })
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Python">
+    ```python
+    import requests
+    import base64
+    
+    with open('invoice.png', 'rb') as f:
+        image_data = base64.b64encode(f.read()).decode('utf-8')
+    
+    response = requests.post(
+        'http://localhost:3000/api/ocr-structured-v4',
+        json={
+            'imageBase64': image_data,
+            'mimeType': 'image/png'
+        }
+    )
+    ```
+  </Tab>
+</Tabs>
+
+### Data URL Format
+
+You can also pass a complete data URL (useful when reading from file inputs in the browser).
+
+```json
+{
+  "imageBase64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA..."
+}
+```
+
+<Note>
+When using a data URL, the `mimeType` parameter is optional as it's embedded in the data URL.
+</Note>
+
+## PDF Requests
+
+### Public PDF URL
+
+The simplest format for PDFs - provide a publicly accessible URL.
+
+<ParamField path="pdfUrl" type="string" required>
+  Publicly accessible URL to the PDF document
+</ParamField>
+
+```bash
+curl -X POST http://localhost:3000/api/ocr-structured-v4 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pdfUrl": "https://example.com/invoices/invoice-001.pdf"
+  }'
+```
+
+<Warning>
+The PDF must be accessible without authentication. OpenRouter will fetch the document from this URL.
+</Warning>
+
+### Base64 Encoded PDF
+
+For PDFs that aren't publicly accessible or when uploading directly.
+
+<ParamField path="pdfBase64" type="string" required>
+  PDF data as a base64-encoded string or data URL
+</ParamField>
+
+<Tabs>
+  <Tab title="cURL">
+    ```bash
+    curl -X POST http://localhost:3000/api/ocr-structured-v4 \
+      -H "Content-Type: application/json" \
+      -d '{
+        "pdfBase64": "JVBERi0xLjQKJeLjz9MKMyAwIG9iago8..."
+      }'
+    ```
+  </Tab>
+  
+  <Tab title="JavaScript">
+    ```javascript
+    // Reading from file input
+    const file = document.getElementById('pdfInput').files[0];
+    const reader = new FileReader();
+    
+    reader.onload = async (e) => {
+      const base64 = e.target.result.split(',')[1];
+      
+      const response = await fetch('/api/ocr-structured-v4', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdfBase64: base64 })
+      });
+    };
+    
+    reader.readAsDataURL(file);
+    ```
+  </Tab>
+  
+  <Tab title="Python">
+    ```python
+    import base64
+    import requests
+    
+    with open('invoice.pdf', 'rb') as f:
+        pdf_data = base64.b64encode(f.read()).decode('utf-8')
+    
+    response = requests.post(
+        'http://localhost:3000/api/ocr-structured-v4',
+        json={'pdfBase64': pdf_data}
+    )
+    ```
+  </Tab>
+</Tabs>
+
+### PDF Data URL
+
+Similar to images, you can use a data URL format:
+
+```json
+{
+  "pdfBase64": "data:application/pdf;base64,JVBERi0xLjQKJeLjz9MKMyAwIG9iago8..."
+}
+```
+
+## Advanced Options
+
+### Model Override
+
+Override the default OpenRouter model for a specific request.
+
+<ParamField path="model" type="string">
+  OpenRouter model ID (e.g., "openai/gpt-4o", "google/gemini-2.0-flash")
+</ParamField>
+
+```json
+{
+  "imageBase64": "iVBORw0KGgoAAAANSUhEUgAA...",
+  "model": "openai/gpt-4o"
+}
+```
+
+<Tip>
+Use this for A/B testing different models or for processing complex invoices with more powerful models.
+</Tip>
+
+### PDF Plugin Configuration
+
+Configure the PDF parsing engine and options.
+
+<ParamField path="plugins" type="array">
+  Array of OpenRouter plugin configurations. Typically used to override the PDF parser.
+</ParamField>
+
+```json
+{
+  "pdfUrl": "https://example.com/invoice.pdf",
+  "plugins": [
+    {
+      "id": "file-parser",
+      "config": {
+        "engine": "mistral-ocr"
+      }
+    }
+  ]
+}
+```
+
+**Available PDF Engines:**
+
+| Engine | Description | Use Case |
+|--------|-------------|----------|
+| `pdf-text` | Fast text extraction (default) | Standard PDFs with selectable text |
+| `mistral-ocr` | OCR-based extraction | Scanned PDFs, image-based documents |
+| `native` | Native OpenRouter parsing | When you want model-native PDF handling |
+
+<Note>
+If omitted, the system uses the `OPENROUTER_PDF_ENGINE` environment variable (defaults to `pdf-text`).
+</Note>
+
+### Annotations (Cost Optimization)
+
+Reuse previously parsed PDF metadata to avoid redundant processing costs.
+
+<ParamField path="annotations" type="object">
+  OpenRouter annotations from a previous response. When provided, skips re-parsing the PDF.
+</ParamField>
+
+```json
+{
+  "pdfUrl": "https://example.com/invoice.pdf",
+  "annotations": {
+    "file-parser": {
+      "output": {
+        "text": "...",
+        "pages": [...]
+      }
+    }
+  }
+}
+```
+
+**Workflow:**
+
+1. First request: Process PDF normally, save `annotations` from response
+2. Subsequent requests: Include saved `annotations` to reuse parsed content
+3. Cost savings: Avoid file-parser plugin charges on repeated requests
+
+<Accordion title="Example: Reusing Annotations">
+```javascript
+// First request - parse PDF
+const firstResponse = await fetch('/api/ocr-structured-v4', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    pdfUrl: 'https://example.com/invoice.pdf'
+  })
+});
+
+const firstData = await firstResponse.json();
+const annotations = firstData.annotations; // Save these
+
+// Second request - reuse parsed content with different model
+const secondResponse = await fetch('/api/ocr-structured-v4', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    pdfUrl: 'https://example.com/invoice.pdf',
+    annotations: annotations, // Reuse!
+    model: 'openai/gpt-4o' // Try a different model
+  })
+});
+```
+</Accordion>
+
+## Complete Request Examples
+
+### Minimal Image Request
+
+```json
+{
+  "imageBase64": "iVBORw0KGgoAAAANSUhEUgAA..."
+}
+```
+
+### Full-Featured PDF Request
+
+```json
+{
+  "pdfUrl": "https://example.com/invoice.pdf",
+  "model": "openai/gpt-4o",
+  "plugins": [
+    {
+      "id": "file-parser",
+      "config": {
+        "engine": "mistral-ocr"
+      }
+    }
+  ]
+}
+```
+
+### Cost-Optimized Repeated Request
+
+```json
+{
+  "pdfBase64": "JVBERi0xLjQKJeLjz9MKMyAwIG9iago8...",
+  "annotations": {
+    "file-parser": {
+      "output": { "text": "...", "pages": [...] }
+    }
+  },
+  "model": "google/gemini-2.0-flash"
+}
+```
+
+## Request Size Limits
+
+<Warning>
+**Maximum request sizes:**
+- Images: 10 MB (base64 encoded)
+- PDFs: 10 MB (base64 encoded or via URL)
+- Total request body: 10 MB
+
+Larger files may result in timeout or error responses.
+</Warning>
+
+## Supported File Types
+
+### Images
+
+- PNG (`.png`)
+- JPEG (`.jpg`, `.jpeg`)
+- WebP (`.webp`)
+- BMP (`.bmp`)
+- GIF (`.gif`)
+
+### PDFs
+
+- PDF 1.4 through 2.0
+- Single or multi-page documents
+- Text-based or scanned (with OCR engine)
+
+## Error Handling
+
+Common request validation errors:
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `Missing image or PDF input` | No image/PDF parameter provided | Include `imageBase64`, `pdfUrl`, or `pdfBase64` |
+| `Invalid base64 format` | Malformed base64 string | Verify base64 encoding |
+| `File too large` | File exceeds 10 MB | Compress or reduce file size |
+| `Invalid model ID` | Unknown model specified | Use a valid OpenRouter model ID |
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="OCR Endpoints" icon="code" href="/api/overview">
+    Explore all available API endpoints
+  </Card>
+  <Card title="Model Selection" icon="microchip" href="/configuration/model-selection">
+    Choose the right model for your use case
+  </Card>
+  <Card title="Processing PDFs" icon="file-pdf" href="/guides/processing-pdfs">
+    Guide to working with PDF documents
+  </Card>
+  <Card title="PDF Support" icon="file-lines" href="/features/pdf-support">
+    Learn about PDF processing features
+  </Card>
+</CardGroup>

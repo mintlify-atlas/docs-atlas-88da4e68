@@ -1,0 +1,702 @@
+---
+title: Debugging with Review Tool
+description: Use the /review page to debug extraction issues, paste LangFuse traces, and verify reconciliation
+---
+
+## Overview
+
+The Review Tool (`/review`) is a specialized debugging interface that helps you understand what the AI extracted and how reconciliation adjusted the numbers. It's especially useful for:
+
+- Troubleshooting extraction errors
+- Verifying reconciliation logic
+- Comparing LangFuse trace outputs
+- Understanding discrepancies between computed and printed totals
+
+## Accessing the Review Tool
+
+From anywhere in the Invoice OCR app:
+
+<Steps>
+  <Step title="Navigate to Review Tool">
+    Click the **Review Tool** button in the top navigation bar, or visit `/review` directly.
+  </Step>
+  
+  <Step title="Paste JSON payload">
+    Paste any JSON containing invoice data into the text area.
+  </Step>
+  
+  <Step title="Preview invoice">
+    Click **Preview Invoice** to analyze and visualize the data.
+  </Step>
+</Steps>
+
+<Tip>
+  The Review Tool is accessible from the header on every page:
+  
+  ```tsx
+  // Source: app/page.tsx:40-52
+  <Link href="/review" className={buttonVariants({ variant: "outline", size: "sm" })}>
+    <svg ...>
+      <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+    </svg>
+    <span>Review Tool</span>
+  </Link>
+  ```
+</Tip>
+
+## Supported JSON Formats
+
+The Review Tool auto-detects multiple schema formats:
+
+### Format 1: Compact Schema
+
+```json
+{
+  "voucher": {
+    "invoice_number": "INV-001",
+    "invoice_date": "2025-03-04",
+    "total_invoice_amount": 1245.00,
+    "invoice_discount": 0,
+    "round_off": 0.1
+  },
+  "items": [
+    {
+      "name": "Product A",
+      "quantity": 2,
+      "price": 250,
+      "tax_rate": 18,
+      "hsn_sac_code": "8523"
+    }
+  ],
+  "party": {
+    "party_name": "Customer Name",
+    "party_gstin_number": "32ABDFA4059P1ZA"
+  }
+}
+```
+
+**Detection**:
+
+```typescript
+// Source: app/review/page.tsx:93-100
+function isInvoiceDocCandidate(value: unknown): value is InvoiceDoc {
+  if (!isRecord(value)) return false;
+  if (!("voucher" in value) || !("items" in value) || !("party" in value)) return false;
+  const voucher = (value as Record<string, unknown>).voucher;
+  const items = (value as Record<string, unknown>).items;
+  const party = (value as Record<string, unknown>).party;
+  return isRecord(voucher) && Array.isArray(items) && isRecord(party);
+}
+```
+
+### Format 2: v4 Schema (doc_level)
+
+```json
+{
+  "doc_level": {
+    "supplier_name": "ABC Enterprises",
+    "supplier_gstin": "27AABCU9603R1ZM",
+    "invoice_number": "INV-2025-001",
+    "invoice_date": "2025-03-04",
+    "currency": "INR"
+  },
+  "items": [...],
+  "totals": {
+    "grand_total": 1239.10
+  },
+  "reconciliation": {
+    "error_absolute": 0.10
+  }
+}
+```
+
+**Detection**:
+
+```typescript
+// Source: app/review/page.tsx:102-109
+function isV4DocCandidate(value: unknown): value is V4Doc {
+  if (!isRecord(value)) return false;
+  if (!("doc_level" in value) || !("items" in value) || !("totals" in value)) return false;
+  const docLevel = (value as Record<string, unknown>).doc_level;
+  const items = (value as Record<string, unknown>).items;
+  const totals = (value as Record<string, unknown>).totals;
+  return isRecord(docLevel) && Array.isArray(items) && isRecord(totals);
+}
+```
+
+### Format 3: voucher_info Schema
+
+Some systems use `voucher_info` instead of `doc_level`:
+
+```json
+{
+  "voucher_info": {
+    "supplier_name": "...",
+    "invoice_number": "..."
+  },
+  "items": [...],
+  "totals": {...}
+}
+```
+
+**Auto-normalization**:
+
+```typescript
+// Source: app/review/page.tsx:122-137
+function normalizeVoucherInfoDoc(doc: VoucherInfoDoc): V4Doc {
+  const { voucher_info: voucherInfo, ...rest } = doc;
+  const docLevel: V4Doc["doc_level"] = {
+    supplier_name: stringOrEmpty(voucherInfo?.supplier_name),
+    supplier_gstin: stringOrEmpty(voucherInfo?.supplier_gstin),
+    invoice_number: stringOrEmpty(voucherInfo?.invoice_number),
+    invoice_date: stringOrEmpty(voucherInfo?.invoice_date),
+    place_of_supply_state_code: stringOrEmpty(voucherInfo?.place_of_supply_state_code),
+    buyer_gstin: stringOrEmpty(voucherInfo?.buyer_gstin),
+    currency: stringOrEmpty(voucherInfo?.currency),
+  };
+  return { ...(rest as Omit<V4Doc, "doc_level">), doc_level: docLevel };
+}
+```
+
+<Note>
+  The system automatically converts `voucher_info` to `doc_level` format for consistent processing.
+</Note>
+
+### Format 4: Nested/Wrapped Payloads
+
+LangFuse traces and API responses often wrap the invoice object:
+
+```json
+[
+  {
+    "headers": { "_list": [["Content-Type", "application/json"]] },
+    "_status": "200 OK",
+    "_status_code": 200,
+    "response": [
+      {
+        "response": {
+          "items": [...],
+          "voucher": {...}
+        }
+      }
+    ]
+  },
+  200
+]
+```
+
+**Auto-detection**:
+
+```typescript
+// Source: app/review/page.tsx:139-171
+function findInvoiceCandidate(value: unknown, path = "$", visited = new WeakSet<object>()): ParseResult | null {
+  if (isV4DocCandidate(value)) {
+    return { kind: "v4", doc: value as V4Doc, path, source: "doc_level" };
+  }
+  if (isVoucherInfoDocCandidate(value)) {
+    const normalized = normalizeVoucherInfoDoc(value as VoucherInfoDoc);
+    return { kind: "v4", doc: normalized, path, source: "voucher_info" };
+  }
+  if (isInvoiceDocCandidate(value)) {
+    return { kind: "compact", doc: value as InvoiceDoc, path, source: "compact" };
+  }
+
+  // Recursively search arrays and objects
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) {
+      const res = findInvoiceCandidate(value[i], `${path}[${i}]`, visited);
+      if (res) return res;
+    }
+  }
+
+  if (typeof value === "object" && value !== null) {
+    for (const [key, child] of Object.entries(value)) {
+      const res = findInvoiceCandidate(child, `${path}.${key}`, visited);
+      if (res) return res;
+    }
+  }
+
+  return null;
+}
+```
+
+The system recursively searches the payload tree to find the first valid invoice object.
+
+## Using the Sample JSON
+
+Not sure what to paste? Load the built-in sample:
+
+<Steps>
+  <Step title="Click Load Sample">
+    Click the **Load Sample** button in the Review Tool interface.
+  </Step>
+  
+  <Step title="Sample JSON loaded">
+    A pre-configured invoice from the compact schema is loaded into the text area.
+    
+    ```typescript
+    // Source: app/review/page.tsx:18-85
+    const SAMPLE_JSON = `[
+      {
+        "response": [
+          {
+            "response": {
+              "items": [
+                {
+                  "discount_rate": 0,
+                  "hsn_sac_code": "8523",
+                  "name": "Quick Heal-IER 1-Int Secessential-1 User",
+                  "price": 250,
+                  "quantity": 1,
+                  "tax_rate": 18,
+                  "unit": "NOS"
+                },
+                ...
+              ],
+              "party": {
+                "party_gstin_number": "32ABDFA4059P1ZA",
+                "party_name": "ASTER DISTRIBUTORS"
+              },
+              "voucher": {
+                "invoice_date": "14-10-2025",
+                "invoice_number": "AST/1501/B2C25",
+                "total_invoice_amount": 1245
+              }
+            }
+          }
+        ]
+      },
+      200
+    ]`;
+    ```
+  </Step>
+  
+  <Step title="Preview the sample">
+    Click **Preview Invoice** to see the structured breakdown and reconciliation.
+  </Step>
+</Steps>
+
+## Pasting LangFuse Traces
+
+LangFuse is a popular LLM observability tool. Here's how to debug Invoice OCR traces:
+
+### Step 1: Export Trace from LangFuse
+
+<Steps>
+  <Step title="Open trace in LangFuse">
+    Navigate to your LangFuse project and open the trace for the invoice extraction call.
+  </Step>
+  
+  <Step title="Find the response output">
+    Look for the final output from the model in the trace tree. This is typically labeled as:
+    - "Output"
+    - "Response"
+    - "Completion"
+  </Step>
+  
+  <Step title="Copy the JSON">
+    Click the copy icon or select and copy the entire JSON output.
+  </Step>
+</Steps>
+
+<Tip>
+  You can copy the entire LangFuse trace response including metadata headers. The Review Tool will automatically extract the invoice object.
+</Tip>
+
+### Step 2: Paste into Review Tool
+
+<Steps>
+  <Step title="Navigate to /review">
+    Go to `http://localhost:3000/review` (or your deployment URL).
+  </Step>
+  
+  <Step title="Paste JSON">
+    Paste the copied JSON into the large text area.
+  </Step>
+  
+  <Step title="Click Preview Invoice">
+    The system will:
+    - Parse the JSON
+    - Auto-detect the schema format
+    - Display the JSON path where the invoice was found
+    - Show the detected schema type
+    
+    ```typescript
+    // Source: app/review/page.tsx:351-401
+    const parseInput = React.useCallback(() => {
+      try {
+        const parsed = JSON.parse(input);
+        const result = findInvoiceCandidate(parsed);
+        if (!result) {
+          setError("No invoice-like object found in the JSON payload.");
+          return;
+        }
+        setError(null);
+        setFoundPath(result.path);
+        const label =
+          result.kind === "compact"
+            ? "Compact (myBillBook) schema"
+            : result.source === "voucher_info"
+              ? "voucher_info schema (normalized to v4)"
+              : "MyBillBook v4 schema";
+        setDetectedLabel(label);
+        if (result.kind === "compact") {
+          setCompactDoc(result.doc);
+          setV4Doc(null);
+        } else {
+          setV4Doc(result.doc);
+          setCompactDoc(null);
+        }
+        // Auto-scroll to results
+        setTimeout(() => {
+          resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 100);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unable to parse JSON.";
+        setError(`Invalid JSON: ${message}`);
+      }
+    }, [input]);
+    ```
+  </Step>
+</Steps>
+
+### Step 3: Analyze Detection
+
+After clicking Preview, you'll see:
+
+<Tabs>
+  <Tab title="Detection Badge">
+    A green badge showing the detected schema:
+    
+    ```tsx
+    // Source: app/review/page.tsx:501-508
+    {foundPath && detectedLabel && (
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 rounded-md text-sm font-medium">
+        <svg ... className="h-4 w-4">
+          <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>Detected {detectedLabel}</span>
+      </div>
+    )}
+    ```
+  </Tab>
+  
+  <Tab title="JSON Path">
+    The exact location in the payload where the invoice was found:
+    
+    ```tsx
+    // Source: app/review/page.tsx:510-514
+    {foundPath && detectedLabel && (
+      <div className="text-xs text-muted-foreground bg-muted/30 p-2 rounded border">
+        <span className="font-medium">Path:</span> <code className="font-mono">{foundPath}</code>
+      </div>
+    )}
+    ```
+    
+    Example output: `$[0].response[0].response`
+  </Tab>
+</Tabs>
+
+## Understanding the Breakdown
+
+For Compact schema invoices, the Review Tool provides a detailed line-level breakdown:
+
+### Line-Level Math Table
+
+```tsx
+// Source: app/review/page.tsx:186-240
+<table className="min-w-full text-sm border rounded-md overflow-hidden">
+  <thead className="bg-muted/50">
+    <tr>
+      <th>No</th>
+      <th>Item</th>
+      <th>Qty</th>
+      <th>Rate ex-tax</th>
+      <th>Base ex-tax</th>
+      <th>Item discount ₹</th>
+      <th>Invoice discount ₹</th>
+      <th>Taxable ex-tax</th>
+      <th>Tax %</th>
+      <th>Tax ₹</th>
+      <th>Line total ₹</th>
+    </tr>
+  </thead>
+  <tbody>
+    {lines.map((line, idx) => {
+      const baseEx = Math.round(line.qty * line.unit_price_ex * 100) / 100;
+      const itemDiscount = Math.round((baseEx - line.taxable_before_invoice_discount) * 100) / 100;
+      const headerDiscount = Math.round((line.taxable_before_invoice_discount - line.taxable_after_invoice_discount) * 100) / 100;
+      return (
+        <tr key={idx}>
+          <td>{idx + 1}</td>
+          <td>{line.name}</td>
+          <td>{line.qty.toFixed(2)}</td>
+          <td>{asRupee(line.unit_price_ex)}</td>
+          <td>{asRupee(baseEx)}</td>
+          <td>{asRupee(itemDiscount)}</td>
+          <td>{asRupee(headerDiscount)}</td>
+          <td>{asRupee(line.taxable_after_invoice_discount)}</td>
+          <td>{line.tax_rate.toFixed(2)}</td>
+          <td>{asRupee(line.tax_amount)}</td>
+          <td>{asRupee(line.line_total_after_tax)}</td>
+        </tr>
+      );
+    })}
+  </tbody>
+</table>
+```
+
+**What each column shows**:
+
+| Column | Description | Formula |
+|--------|-------------|----------|
+| **Qty** | Quantity ordered | From invoice |
+| **Rate ex-tax** | Unit price excluding tax | From invoice or computed |
+| **Base ex-tax** | Line total before discounts | `Qty × Rate ex-tax` |
+| **Item discount ₹** | Line-level discount | `Base ex-tax - Taxable before invoice disc` |
+| **Invoice discount ₹** | Header-level discount allocated to this line | Proportional allocation |
+| **Taxable ex-tax** | Final taxable amount for this line | After all discounts |
+| **Tax %** | GST rate | From invoice |
+| **Tax ₹** | GST amount | `Taxable ex-tax × Tax %` |
+| **Line total ₹** | Final line total | `Taxable ex-tax + Tax ₹` |
+
+### Additional Charges Section
+
+If charges exist (freight, insurance, etc.):
+
+```tsx
+// Source: app/review/page.tsx:259-303
+{charges.length > 0 && (
+  <Card>
+    <CardHeader>
+      <CardTitle>Additional Charges</CardTitle>
+      <CardDescription>
+        Parsed as {assumption.charges_inclusive ? "amounts inclusive of GST" : "amounts exclusive of GST"}.
+      </CardDescription>
+    </CardHeader>
+    <CardContent>
+      <table className="min-w-full text-sm border rounded-md overflow-hidden">
+        <thead>
+          <tr>
+            <th>Charge</th>
+            <th>Input ₹</th>
+            <th>Tax %</th>
+            <th>Taxable ₹</th>
+            <th>Tax ₹</th>
+            <th>Total ₹</th>
+          </tr>
+        </thead>
+        <tbody>
+          {charges.map((charge, idx) => (
+            <tr key={idx}>
+              <td>{charge.name}</td>
+              <td>{asRupee(charge.amount_input)}</td>
+              <td>{charge.tax_rate.toFixed(2)}</td>
+              <td>{asRupee(charge.taxable)}</td>
+              <td>{asRupee(charge.tax_amount)}</td>
+              <td>{asRupee(charge.total_after_tax)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </CardContent>
+  </Card>
+)}
+```
+
+<Note>
+  The system indicates whether charge amounts are inclusive or exclusive of GST based on the `assumption.charges_inclusive` flag.
+</Note>
+
+### Totals Check Card
+
+```tsx
+// Source: app/review/page.tsx:306-338
+<Card>
+  <CardHeader>
+    <CardTitle>Totals Check</CardTitle>
+    <CardDescription>Compare computed totals with the amount printed on the invoice.</CardDescription>
+  </CardHeader>
+  <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 text-sm">
+    <div>
+      <span>Computed grand total</span>
+      <span className="font-medium">{asRupee(computed_grand_total)}</span>
+    </div>
+    <div>
+      <span>Printed total</span>
+      <span>{asRupee(printed_grand_total)}</span>
+    </div>
+    <div className={Math.abs(difference) > 0.05 ? "text-red-600" : "text-green-600"}>
+      <span>Difference</span>
+      <span>{asRupee(Math.abs(difference))}</span>
+    </div>
+    <div>
+      <span>Status</span>
+      <span className="font-medium">{Math.abs(difference) <= 0.05 ? "Matched" : "Not Matching"}</span>
+    </div>
+  </CardContent>
+</Card>
+```
+
+**Color coding**:
+- **Green**: Difference ≤ 5 paise (considered a match due to rounding)
+- **Red**: Difference > 5 paise (indicates a reconciliation issue)
+
+<Warning>
+  A red "Not Matching" status means the reconciliation couldn't produce a total within 5 paise of the printed amount. Review the line-level breakdown for clues.
+</Warning>
+
+## Common Debugging Scenarios
+
+### Scenario 1: No Invoice Detected
+
+**Error message**: "No invoice-like object found in the JSON payload."
+
+**Possible causes**:
+1. The JSON doesn't contain any of the expected schemas
+2. The invoice object is too deeply nested (max depth not explicitly limited, but very deep nesting may cause issues)
+3. Required keys are misspelled or missing
+
+**Solution**:
+- Verify the JSON contains `voucher` + `items` + `party` (Compact)
+- Or `doc_level` + `items` + `totals` (v4)
+- Check for typos in key names
+
+### Scenario 2: Invalid JSON
+
+**Error message**: "Invalid JSON: Unexpected token..."
+
+**Possible causes**:
+1. Malformed JSON (missing quotes, trailing commas)
+2. Copied partial JSON (missing opening/closing braces)
+3. Non-JSON text mixed in
+
+**Solution**:
+- Use a JSON validator (e.g., jsonlint.com) to check syntax
+- Ensure you copied the complete JSON object
+- Remove any text before the first `{` or `[`
+
+### Scenario 3: Large Difference in Totals
+
+**Observation**: Difference shows ₹50.00 or more.
+
+**Possible causes**:
+1. Discounts applied in wrong order
+2. Charges included/excluded incorrectly
+3. Tax rate extraction error
+
+**Solution**:
+- Review the line-level breakdown:
+  - Are item discounts and invoice discounts separated correctly?
+  - Do the tax rates match the invoice (e.g., 18% not 0.18)?
+- Check charges:
+  - Are they marked as taxable when they should be?
+  - Is the GST on charges calculated correctly?
+- Look at the assumptions:
+  - "Discount mode assumed: Before Tax" vs "After Tax"
+  - "Charges inclusive" vs "exclusive"
+
+<Tip>
+  The Compact schema's reconciliation engine (`lib/invoice.ts`) provides an `assumption` object that documents decisions made during reconciliation. Check these first when debugging.
+</Tip>
+
+## v4 Schema Visualization
+
+For v4 schema invoices, the Review Tool uses `InvoiceViewerV4`:
+
+```tsx
+// Source: app/review/page.tsx:547-551
+{v4Doc && (
+  <div className="space-y-6 animate-slide-up">
+    <InvoiceViewerV4 data={v4Doc} />
+  </div>
+)}
+```
+
+**Features**:
+- Supplier and buyer information display
+- Line items with discounts and GST breakdown
+- Totals summary
+- Reconciliation error badge
+
+<Note>
+  The v4 viewer doesn't show the detailed line-by-line math breakdown (that's only for Compact schema). Instead, it displays the final reconciled values.
+</Note>
+
+## Keyboard Shortcuts in Review Tool
+
+The Review Tool supports the same keyboard shortcuts as the main app:
+
+| Shortcut | Action |
+|----------|--------|
+| `⌘K` / `Ctrl+K` | Show shortcuts modal |
+| `⌘↵` / `Ctrl+Enter` | Preview invoice (when JSON is pasted) |
+| `Esc` | Close shortcuts modal |
+
+## Export and Share
+
+To share a Review Tool analysis:
+
+<Steps>
+  <Step title="Copy the URL">
+    The Review Tool doesn't persist state in the URL (for privacy/security). To share:
+    - Have the recipient navigate to `/review`
+    - Send them the JSON payload separately
+  </Step>
+  
+  <Step title="Or screenshot results">
+    Use browser screenshot tools to capture the breakdown tables and totals.
+  </Step>
+</Steps>
+
+<Warning>
+  Don't paste sensitive invoice data into public URLs or sharing tools. The Review Tool processes everything client-side for privacy.
+</Warning>
+
+## Auto-Scroll Behavior
+
+When you click Preview, the page automatically scrolls to the results:
+
+```typescript
+// Source: app/review/page.tsx:389-393
+// Auto-scroll to results after a brief delay
+setTimeout(() => {
+  resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+}, 100);
+```
+
+This ensures you immediately see the preview without manual scrolling.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Understanding Reconciliation" icon="calculator" href="/guides/understanding-reconciliation">
+    Deep dive into how reconciliation works
+  </Card>
+  <Card title="API Reference" icon="code" href="#">
+    Explore the full extraction API
+  </Card>
+</CardGroup>
+
+## Troubleshooting the Review Tool
+
+### Sample doesn't load
+
+**Problem**: Clicking "Load Sample" does nothing.
+
+**Solution**: Check browser console for JavaScript errors. Try refreshing the page.
+
+### Preview button disabled
+
+**Problem**: Can't click "Preview Invoice".
+
+**Solution**: Ensure you've pasted JSON into the text area. The button is only enabled when input exists.
+
+### Very slow with large JSON
+
+**Problem**: Preview takes several seconds for large traces.
+
+**Solution**: 
+- Extract just the invoice object from the trace before pasting
+- Remove unnecessary metadata and headers
+- The recursive search can be slow for deeply nested payloads

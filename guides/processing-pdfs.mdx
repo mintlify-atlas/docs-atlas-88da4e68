@@ -1,0 +1,423 @@
+---
+title: Processing PDFs
+description: Working with PDF invoices, understanding PDF parsing engines, and optimization techniques
+---
+
+## Overview
+
+Invoice OCR provides robust PDF processing capabilities with multiple parsing engines and optimization options. PDFs are handled differently from images to extract text and structure efficiently across multiple pages.
+
+## PDF vs Image Processing
+
+Understanding the difference between PDF and image processing:
+
+<CardGroup cols={2}>
+  <Card title="Images" icon="image">
+    - Direct visual analysis by AI
+    - OCR reads text from pixels
+    - Single page only
+    - Faster processing
+  </Card>
+  <Card title="PDFs" icon="file-pdf">
+    - Text extraction + visual analysis
+    - Multi-page support
+    - Plugin-based parsing
+    - Comprehensive data extraction
+  </Card>
+</CardGroup>
+
+## PDF Input Methods
+
+The API accepts PDFs in two formats:
+
+### Method 1: Base64 Data URLs
+
+The most common method used by the UI:
+
+```tsx
+// Source: components/ocr-uploader.tsx:158-159
+const body = isPdf
+  ? { pdfBase64: preview, filename: file.name || "document.pdf", model }
+  : { imageBase64: preview, mimeType: file.type, model };
+```
+
+**How it works**:
+1. File is read as a data URL using `FileReader.readAsDataURL()`
+2. The data URL (format: `data:application/pdf;base64,<content>`) is sent in the request body
+3. API route converts it to the format expected by OpenRouter
+
+```typescript
+// Source: app/api/ocr-structured-v4/route.ts:31-34
+function toPdfDataUrl(pdfBase64: string) {
+  if (pdfBase64.startsWith("data:")) return pdfBase64;
+  return `data:application/pdf;base64,${pdfBase64}`;
+}
+```
+
+<Note>
+  The system automatically detects data URL format and avoids double-wrapping.
+</Note>
+
+### Method 2: Public URLs
+
+For server-to-server integrations:
+
+```json
+{
+  "pdfUrl": "https://example.com/invoices/invoice-123.pdf",
+  "model": "google/gemini-2.5-flash"
+}
+```
+
+**Use cases**:
+- Invoices stored in cloud storage (S3, GCS)
+- Webhook integrations
+- Batch processing from external systems
+
+<Warning>
+  When using `pdfUrl`, ensure the URL is publicly accessible or includes authentication tokens in the URL itself. The API cannot pass custom headers to the PDF fetch.
+</Warning>
+
+## PDF Parsing Engines
+
+Invoice OCR supports three PDF parsing engines configured via the `OPENROUTER_PDF_ENGINE` environment variable:
+
+### pdf-text (Default)
+
+```bash
+OPENROUTER_PDF_ENGINE=pdf-text
+```
+
+**Characteristics**:
+- Extracts text layers from native PDFs
+- Fast and accurate for digitally created invoices
+- Preserves structure and layout hints
+- **Best for**: ERP-generated invoices, e-invoices, programmatically created PDFs
+
+**Example configuration**:
+
+```typescript
+// Source: app/api/ocr-structured-v4/route.ts:269-275
+if (isPdf) {
+  const engine = process.env.OPENROUTER_PDF_ENGINE || "pdf-text";
+  const plugins: unknown = body.plugins || [
+    {
+      id: "file-parser",
+      pdf: { engine },
+    },
+  ];
+  (payload as Record<string, unknown>).plugins = plugins as unknown;
+}
+```
+
+### mistral-ocr
+
+```bash
+OPENROUTER_PDF_ENGINE=mistral-ocr
+```
+
+**Characteristics**:
+- Uses Mistral AI's OCR capabilities
+- Handles scanned documents and images embedded in PDFs
+- Better for handwritten or low-quality scans
+- **Best for**: Scanned invoices, photos of paper documents
+
+<Tip>
+  If your PDFs are scanned images or photos rather than native digital documents, switch to `mistral-ocr` for better accuracy.
+</Tip>
+
+### native
+
+```bash
+OPENROUTER_PDF_ENGINE=native
+```
+
+**Characteristics**:
+- Uses the model's built-in PDF understanding
+- No preprocessing or text extraction
+- Relies entirely on model's multimodal capabilities
+- **Best for**: Testing, comparing approaches, or when other engines fail
+
+## Plugin Configuration
+
+You can override the PDF engine on a per-request basis:
+
+```typescript
+// Custom plugin configuration
+const response = await fetch("/api/ocr-structured-v4", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    pdfBase64: pdfDataUrl,
+    filename: "invoice.pdf",
+    model: "google/gemini-2.5-flash",
+    plugins: [
+      {
+        id: "file-parser",
+        pdf: { engine: "mistral-ocr" }
+      }
+    ]
+  })
+});
+```
+
+<Note>
+  Custom plugins in the request body take precedence over the `OPENROUTER_PDF_ENGINE` environment variable.
+</Note>
+
+## Multi-Page Processing
+
+The system processes all pages in a PDF automatically:
+
+```typescript
+// System prompt excerpt from: app/api/ocr-structured-v4/route.ts:145
+"If a PDF is provided, consider ALL pages. Prefer HSN tables and tax summaries found on any page as anchors."
+```
+
+**Key behaviors**:
+
+<Steps>
+  <Step title="Full document analysis">
+    The AI analyzes every page of the PDF, not just the first page.
+  </Step>
+  
+  <Step title="Cross-page reconciliation">
+    Data from summary pages (totals, HSN tables) is used to verify line items from earlier pages.
+  </Step>
+  
+  <Step title="Duplicate detection">
+    The system treats duplicate copies (Original/Duplicate/Transporter) as a single invoice.
+    
+    ```typescript
+    // From system prompt
+    "Treat duplicate copies (Original/Duplicate/Transporter) as one invoice."
+    ```
+  </Step>
+</Steps>
+
+## OpenRouter Annotations
+
+To avoid re-parsing PDFs on subsequent requests, use annotations:
+
+```typescript
+// First request - parse the PDF
+const firstResponse = await fetch("/api/ocr-structured-v4", {
+  method: "POST",
+  body: JSON.stringify({
+    pdfBase64: pdfDataUrl,
+    filename: "invoice.pdf"
+  })
+});
+
+const firstData = await firstResponse.json();
+const annotations = firstData._annotations; // OpenRouter metadata
+
+// Second request - reuse parsed content
+const secondResponse = await fetch("/api/ocr-structured-v4", {
+  method: "POST",
+  body: JSON.stringify({
+    pdfBase64: pdfDataUrl,
+    filename: "invoice.pdf",
+    annotations: annotations // Skip re-parsing
+  })
+});
+```
+
+**How it works**:
+
+```typescript
+// Source: app/api/ocr-structured-v4/route.ts:256-265
+if (body.annotations) {
+  const msgs = payload.messages as Array<Record<string, unknown>>;
+  msgs.push({
+    role: "assistant",
+    content: "Previous file parse metadata",
+    annotations: body.annotations as unknown,
+  });
+}
+```
+
+<Tip>
+  Using annotations can significantly reduce processing costs for PDFs, especially large multi-page documents. The AI reuses the parsed text without re-processing the binary file.
+</Tip>
+
+## Optimization Best Practices
+
+### Choose the Right Engine
+
+<Tabs>
+  <Tab title="Digital PDFs">
+    For invoices generated by accounting software, ERPs, or e-invoicing systems:
+    
+    ```bash
+    OPENROUTER_PDF_ENGINE=pdf-text
+    ```
+    
+    - Fastest processing
+    - Highest accuracy for text extraction
+    - Preserves layout structure
+  </Tab>
+  
+  <Tab title="Scanned PDFs">
+    For scanned paper invoices or photo-based PDFs:
+    
+    ```bash
+    OPENROUTER_PDF_ENGINE=mistral-ocr
+    ```
+    
+    - Better OCR for unclear text
+    - Handles skewed or rotated documents
+    - Supports handwritten annotations
+  </Tab>
+  
+  <Tab title="Mixed or Unknown">
+    When you're unsure or have a mix of both:
+    
+    ```bash
+    OPENROUTER_PDF_ENGINE=native
+    ```
+    
+    - Let the model decide the best approach
+    - Works as a fallback option
+    - Useful for testing and comparison
+  </Tab>
+</Tabs>
+
+### File Size Optimization
+
+Large PDFs can slow down processing and increase costs:
+
+<Steps>
+  <Step title="Compress PDFs">
+    Use tools like Adobe Acrobat, Ghostscript, or online compressors:
+    
+    ```bash
+    # Using Ghostscript
+    gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 \
+       -dPDFSETTINGS=/ebook -dNOPAUSE -dQUIET -dBATCH \
+       -sOutputFile=compressed.pdf input.pdf
+    ```
+  </Step>
+  
+  <Step title="Reduce image resolution">
+    If the PDF contains embedded images, reduce their DPI:
+    - 150 DPI is sufficient for text extraction
+    - 300 DPI for high-quality scans
+  </Step>
+  
+  <Step title="Remove unnecessary pages">
+    Strip out blank pages, covers, or non-invoice content before upload.
+  </Step>
+</Steps>
+
+### Model Selection
+
+Different models have different PDF processing capabilities:
+
+```typescript
+// Source: components/ocr-uploader.tsx:430-435
+<option value="google/gemini-2.5-flash">Gemini 2.5 Flash (Recommended)</option>
+<option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+<option value="openai/o3-mini">OpenAI o3-mini</option>
+<option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
+<option value="openai/gpt-5-reasoning">GPT-5 Reasoning</option>
+```
+
+**Recommendations**:
+- **Gemini 2.5 Flash**: Best balance of speed, cost, and accuracy for PDFs
+- **Gemini 2.5 Pro**: Highest accuracy for complex multi-page invoices
+- **GPT-4o Mini**: Good alternative for structured extraction
+
+## Debugging PDF Processing
+
+If you encounter issues with PDF extraction:
+
+### Use Raw Text Mode
+
+Switch to "Raw Text" extraction mode to see what the model reads:
+
+```typescript
+// Source: components/ocr-uploader.tsx:155
+const endpoint = mode === "structured" ? 
+  (extractor === "v4" ? "/api/ocr-structured-v4" : "/api/ocr-structured") : 
+  "/api/ocr";
+```
+
+<Steps>
+  <Step title="Set mode to 'Raw Text'">
+    In the UI, select **Raw Text** from the Extraction Mode dropdown.
+  </Step>
+  
+  <Step title="Upload and extract">
+    Upload your PDF and click **Extract Data**.
+  </Step>
+  
+  <Step title="Review raw text">
+    Examine the extracted text to verify the PDF parser is reading the content correctly.
+  </Step>
+</Steps>
+
+### Check API Response
+
+Inspect the full API response for debugging information:
+
+```typescript
+// Source: app/api/ocr-structured-v4/route.ts:299-306
+const json = await response.json();
+const content: unknown = json?.choices?.[0]?.message?.content;
+if (!content) {
+  return NextResponse.json(
+    { error: "No content returned from model" },
+    { status: 500 }
+  );
+}
+```
+
+<Warning>
+  If the API returns "No content returned from model", the PDF may be corrupted, password-protected, or in an unsupported format.
+</Warning>
+
+## Common PDF Issues
+
+### Password-Protected PDFs
+
+**Problem**: The PDF requires a password to open.
+
+**Solution**: Remove the password before uploading:
+
+```bash
+# Using qpdf
+qpdf --decrypt --password=yourpassword input.pdf output.pdf
+```
+
+### Scanned Images as PDFs
+
+**Problem**: Low accuracy for PDFs that are just scanned images.
+
+**Solution**: Switch to `mistral-ocr` engine:
+
+```bash
+OPENROUTER_PDF_ENGINE=mistral-ocr
+```
+
+### Multi-Language PDFs
+
+**Problem**: Invoices with mixed languages (e.g., English and Hindi).
+
+**Solution**: Gemini models handle multi-language content well. Ensure your system prompt doesn't restrict language:
+
+```typescript
+// The v4 API automatically supports multi-language
+// meta.language field captures detected language
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Understanding Reconciliation" icon="calculator" href="/guides/understanding-reconciliation">
+    Learn how the system validates and reconciles invoice totals
+  </Card>
+  <Card title="Review Tool" icon="magnifying-glass" href="/guides/debugging-with-review-tool">
+    Debug extraction issues using the review tool
+  </Card>
+</CardGroup>

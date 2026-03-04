@@ -1,0 +1,211 @@
+---
+title: Environment Variables
+description: Complete reference for all environment variables used in Invoice OCR
+icon: terminal
+---
+
+Invoice OCR uses environment variables for configuration. All variables should be set in `.env.local` (not committed to version control).
+
+## Quick Setup
+
+```bash
+cp .env.example .env.local
+```
+
+Then edit `.env.local` with your values.
+
+<Warning>
+Never commit `.env.local` to version control. This file is included in `.gitignore` by default.
+</Warning>
+
+## Required Variables
+
+<ParamField path="OPENROUTER_API_KEY" type="string" required>
+  Your OpenRouter API key for accessing vision models.
+  
+  **How to get it:**
+  1. Sign up at [openrouter.ai](https://openrouter.ai)
+  2. Navigate to [openrouter.ai/keys](https://openrouter.ai/keys)
+  3. Create a new API key
+  4. Copy the key to your `.env.local` file
+  
+  **Example:**
+  ```bash
+  OPENROUTER_API_KEY=sk-or-v1-1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+  ```
+  
+  <Warning>
+  The application will fail with a 500 error if this variable is not set. All API routes check for this key before processing requests.
+  </Warning>
+</ParamField>
+
+## Model Configuration
+
+<ParamField path="OPENROUTER_MODEL" type="string" default="google/gemini-2.0-flash">
+  Default vision model for OCR operations.
+  
+  **Used by:**
+  - `/api/ocr` (raw text extraction)
+  - `/api/ocr-structured` (legacy structured extraction)
+  - `/api/ocr-structured-v4` (normalized GST extraction)
+  
+  **Fallback behavior:**
+  - If not set: defaults to `google/gemini-2.0-flash`
+  - Can be overridden per-request via the `model` field in API request body
+  
+  **Example values:**
+  ```bash
+  # Fast and cost-effective (default)
+  OPENROUTER_MODEL=google/gemini-2.0-flash
+  
+  # Higher accuracy
+  OPENROUTER_MODEL=openai/gpt-4o
+  OPENROUTER_MODEL=anthropic/claude-3.5-sonnet
+  
+  # Budget option
+  OPENROUTER_MODEL=openai/gpt-4o-mini
+  ```
+  
+  <Note>
+  See [Model Selection](/configuration/model-selection) for guidance on choosing the right model for your use case.
+  </Note>
+</ParamField>
+
+## PDF Processing
+
+<ParamField path="OPENROUTER_PDF_ENGINE" type="string" default="pdf-text">
+  PDF parsing engine used by OpenRouter's file-parser plugin.
+  
+  **Available engines:**
+  - `pdf-text` (default) - Fast text extraction, works with most PDFs
+  - `mistral-ocr` - OCR-based extraction for scanned PDFs or images within PDFs
+  - `native` - Provider's native PDF handling
+  
+  **Used by:**
+  - `/api/ocr` when processing PDFs
+  - `/api/ocr-structured-v4` when processing PDFs
+  
+  **Example:**
+  ```bash
+  OPENROUTER_PDF_ENGINE=pdf-text
+  ```
+  
+  **Per-request override:**
+  You can override this setting by passing a `plugins` array in the request body:
+  ```json
+  {
+    "pdfBase64": "...",
+    "plugins": [
+      {
+        "id": "file-parser",
+        "pdf": { "engine": "mistral-ocr" }
+      }
+    ]
+  }
+  ```
+</ParamField>
+
+## OpenRouter Metadata
+
+These variables are sent as headers to OpenRouter for analytics and billing purposes.
+
+<ParamField path="OPENROUTER_SITE_URL" type="string" default="http://localhost:3000">
+  Your application's URL, sent in the `HTTP-Referer` header.
+  
+  **Example:**
+  ```bash
+  OPENROUTER_SITE_URL=https://invoice-ocr.yourdomain.com
+  ```
+  
+  <Note>
+  OpenRouter uses this for analytics and to help identify your application in their dashboard.
+  </Note>
+</ParamField>
+
+<ParamField path="OPENROUTER_APP_NAME" type="string" default="Invoice OCR">
+  Your application's name, sent in the `X-Title` header.
+  
+  **Example:**
+  ```bash
+  OPENROUTER_APP_NAME=My Invoice OCR App
+  ```
+</ParamField>
+
+## Complete Example
+
+Here's a complete `.env.local` file with all variables configured:
+
+```bash .env.local
+# Required: Your OpenRouter API key
+OPENROUTER_API_KEY=sk-or-v1-1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+
+# Optional: Model selection (defaults to google/gemini-2.0-flash)
+OPENROUTER_MODEL=google/gemini-2.0-flash
+
+# Optional: PDF engine (defaults to pdf-text)
+OPENROUTER_PDF_ENGINE=pdf-text
+
+# Optional: Metadata for OpenRouter
+OPENROUTER_SITE_URL=http://localhost:3000
+OPENROUTER_APP_NAME=Invoice OCR
+```
+
+## Environment Variable Priority
+
+For each API route, the priority order is:
+
+1. **Request body parameter** (e.g., `model` field in POST body)
+2. **Environment variable** (from `.env.local`)
+3. **Default value** (hardcoded in the route)
+
+### Example: Model Selection
+
+```typescript
+const model = body.model || process.env.OPENROUTER_MODEL || "google/gemini-2.0-flash";
+```
+
+This allows you to:
+- Set a default model in `.env.local`
+- Override it per-request when needed
+- Fall back to a sensible default if neither is provided
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Error: Server missing OPENROUTER_API_KEY">
+    This means `OPENROUTER_API_KEY` is not set in your `.env.local` file.
+    
+    **Solution:**
+    1. Create `.env.local` if it doesn't exist
+    2. Add `OPENROUTER_API_KEY=your-key-here`
+    3. Restart the development server
+  </Accordion>
+  
+  <Accordion title="Changes to .env.local not taking effect">
+    Next.js loads environment variables at startup.
+    
+    **Solution:**
+    - Stop the dev server (Ctrl+C)
+    - Restart with `npm run dev`
+  </Accordion>
+  
+  <Accordion title="API key showing in logs or error messages">
+    The application filters API keys from error messages, but be cautious.
+    
+    **Best practices:**
+    - Never log `process.env.OPENROUTER_API_KEY`
+    - Use server-side only (never expose to client)
+    - Rotate keys regularly
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="OpenRouter Setup" icon="key" href="/configuration/openrouter-setup">
+    Step-by-step guide to getting your OpenRouter API key
+  </Card>
+  <Card title="Model Selection" icon="brain" href="/configuration/model-selection">
+    Choose the right model for your use case
+  </Card>
+</CardGroup>

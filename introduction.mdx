@@ -1,0 +1,137 @@
+---
+title: Introduction
+description: Transform invoice documents into structured data with AI-powered OCR
+---
+
+Invoice OCR is an intelligent document processing platform that extracts and validates invoice data from images and PDFs using advanced vision models. Built for accuracy and reliability, it specializes in India GST invoices with automatic reconciliation.
+
+## What is Invoice OCR?
+
+Invoice OCR combines AI vision models with sophisticated validation logic to convert invoice documents into structured, machine-readable data. The platform processes both images and PDFs, extracting everything from line items to tax calculations while ensuring mathematical accuracy.
+
+<Note>
+  Invoice OCR uses OpenRouter to access multiple state-of-the-art vision models, giving you flexibility to choose the best model for your use case.
+</Note>
+
+## Key Capabilities
+
+### Multiple Extraction Modes
+
+Choose the right extraction mode for your workflow:
+
+- **Raw Text OCR** - Extract unstructured text from documents for basic processing
+- **Structured JSON** - Convert invoices into the MyBillBook schema format
+- **India GST (v4)** - Specialized extraction with automatic reconciliation for Indian GST invoices
+
+### Intelligent Reconciliation
+
+The reconciliation engine validates extracted data against invoice totals:
+
+- Automatically verifies line item calculations (quantity × rate)
+- Validates discount applications (sequential and flat discounts)
+- Confirms GST calculations (CGST/SGST for intra-state, IGST for inter-state)
+- Detects and applies round-off adjustments
+- Flags mismatches exceeding ₹0.05 tolerance
+
+<Warning>
+  The reconciliation engine tries multiple interpretations (tax-inclusive vs tax-exclusive pricing) and selects the one with the smallest error. Always review the `reconciliation.error_absolute` field in the response.
+</Warning>
+
+### PDF and Image Support
+
+Process documents in multiple formats:
+
+- **Images**: PNG, JPG, JPEG via base64 encoding
+- **PDFs**: Via public URL or base64 data URL
+- Multi-page PDF support with cross-page tax table validation
+
+### India GST Compliance
+
+Purpose-built for Indian invoicing:
+
+- Recognizes standard GST slabs (0%, 0.25%, 3%, 5%, 12%, 18%, 28%)
+- Validates GSTIN format and place of supply
+- Handles HSN/SAC codes and UQC units
+- Processes header-level and line-level discounts
+- Supports TCS (Tax Collected at Source)
+- Manages additional charges (freight, insurance, etc.)
+
+## How It Works
+
+<Steps>
+  <Step title="Upload Document">
+    Upload an invoice image or PDF through the web interface or API. The system accepts files up to 10MB.
+  </Step>
+  
+  <Step title="AI Processing">
+    Your document is sent to an OpenRouter vision model (default: Gemini 2.5 Flash) with a specialized prompt that enforces strict JSON schema compliance.
+  </Step>
+  
+  <Step title="Reconciliation">
+    The reconciliation engine validates all calculations, applies discount sequences, splits GST amounts, and ensures totals match printed values within ₹0.05 tolerance.
+  </Step>
+  
+  <Step title="Receive Results">
+    Get back structured JSON with normalized fields, computed totals, and a reconciliation report showing any discrepancies.
+  </Step>
+</Steps>
+
+## API Architecture
+
+Invoice OCR provides three REST API endpoints:
+
+| Endpoint | Purpose | Schema |
+|----------|---------|--------|
+| `/api/ocr` | Raw text extraction | Plain text response |
+| `/api/ocr-structured` | MyBillBook schema | Compact JSON format |
+| `/api/ocr-structured-v4` | India GST normalized | v4 schema with reconciliation |
+
+## Technology Stack
+
+Invoice OCR is built with modern web technologies:
+
+- **Framework**: Next.js 15.5.2 with App Router
+- **Language**: TypeScript 5 (strict mode)
+- **UI**: React 19, Tailwind CSS v4, shadcn/ui
+- **OCR Provider**: OpenRouter API with vision models
+- **Testing**: Vitest with comprehensive reconciliation tests
+
+## Use Cases
+
+### Accounts Payable Automation
+
+Automate invoice processing workflows:
+- Extract vendor details, line items, and amounts
+- Validate tax calculations before payment
+- Route invoices based on extracted metadata
+
+### Expense Management
+
+Digitize receipts and invoices for expense tracking:
+- Capture itemized expenses from scanned documents
+- Validate GST claims with automatic reconciliation
+- Export to accounting systems in structured format
+
+### Tax Compliance
+
+Ensure GST compliance and audit readiness:
+- Verify GSTIN and HSN codes
+- Validate tax calculations against GST slabs
+- Generate audit trails with reconciliation reports
+
+### Data Migration
+
+Digitize legacy invoice archives:
+- Batch process historical invoices
+- Extract structured data for database migration
+- Maintain data quality with validation checks
+
+## Next Steps
+
+<Card title="Quick Start" icon="rocket" href="/quickstart">
+  Process your first invoice in under 5 minutes
+</Card>
+
+<Card title="Installation" icon="download" href="/installation">
+  Set up Invoice OCR in your development environment
+</Card>

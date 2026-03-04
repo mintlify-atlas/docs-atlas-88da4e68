@@ -1,0 +1,104 @@
+---
+title: Testing Overview
+description: Testing strategy and setup for Invoice OCR
+---
+
+Invoice OCR uses **Vitest** as its primary testing framework for unit and integration tests of business logic.
+
+## What's Tested
+
+The test suite focuses on:
+
+- **Business Logic**: Invoice reconciliation algorithms in `lib/`
+- **Standards Compliance**: GST rate normalization, UQC codes, GSTIN validation
+- **Edge Cases**: Handling of malformed data, null values, and boundary conditions
+- **Calculation Accuracy**: Item totals, discounts, tax calculations, and reconciliation
+
+### Current Test Coverage
+
+Two main test suites are currently implemented:
+
+| Test File | Purpose | Lines |
+|-----------|---------|-------|
+| `lib/__tests__/standards.test.ts` | Standards compliance (GST, UQC, GSTIN) | 442 |
+| `lib/__tests__/invoice_v4.test.ts` | Reconciliation engine (v4) | 1079 |
+
+## Vitest Configuration
+
+The project uses Vitest with the following configuration:
+
+```typescript title="vitest.config.ts"
+import { defineConfig } from 'vitest/config'
+import path from 'path'
+
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: 'node',
+    include: ['**/*.test.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      include: ['lib/**/*.ts'],
+    },
+  },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, '.'),
+    },
+  },
+})
+```
+
+### Configuration Highlights
+
+- **Globals enabled**: `describe`, `it`, `expect` available without imports
+- **Node environment**: Tests run in Node.js context
+- **Coverage provider**: V8 for accurate code coverage
+- **Coverage reporters**: Text (terminal), JSON, and HTML formats
+- **Path alias**: `@/` resolves to project root
+- **Test pattern**: All `*.test.ts` files are included
+
+## Testing Strategy
+
+### Unit Tests
+
+Focus on individual functions and utilities:
+
+- Helper functions (`n()`, `r2()`, `effectiveDiscountPct()`)
+- Standards normalization (`normalizeGstRate()`, `normalizeUqc()`)
+- State code extraction (`getStateCodeFromGstin()`)
+
+### Integration Tests
+
+Test complete workflows:
+
+- Full invoice reconciliation with multiple items
+- Discount cascading (item-level and header-level)
+- GST splitting (CGST/SGST vs IGST)
+- HSN tax table scaling
+- TCS and round-off handling
+
+### Real-World Scenarios
+
+Test suites include realistic invoice examples:
+
+- Retail invoices with multiple products
+- B2B invoices with TCS
+- Service invoices with IGST
+- Multi-rate invoices with different GST slabs
+
+## Future Testing Plans
+
+<Note>
+  **Priority**: Add tests for API routes (`app/api/*`) and additional business logic in `lib/*`
+</Note>
+
+<Note>
+  **Consideration**: Playwright for E2E tests covering upload → OCR → display flows
+</Note>
+
+## Related
+
+- [Running Tests](/development/testing/running-tests) - Commands and workflows
+- [Writing Tests](/development/testing/writing-tests) - Guidelines and examples

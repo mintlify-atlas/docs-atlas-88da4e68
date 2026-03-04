@@ -1,0 +1,265 @@
+---
+title: 'Commit Conventions'
+description: 'Commit message format and Conventional Commits examples'
+---
+
+## Commit Message Format
+
+Invoice OCR follows the [Conventional Commits](https://www.conventionalcommits.org/) specification for clear and structured commit messages.
+
+### Basic Structure
+
+```
+<type>: <description>
+
+[optional body]
+
+[optional footer]
+```
+
+### Rules
+
+- Messages should be **clear and scoped**
+- Use lowercase for the description
+- No period at the end of the description
+- Keep the first line under 72 characters
+- Use the imperative mood ("add" not "added" or "adds")
+
+## Commit Types
+
+### `feat:` New Features
+
+Use for new functionality or capabilities:
+
+```bash
+feat: add PDF support to OCR v4 endpoint
+feat: add reconciliation validation for line items
+feat: implement multi-page PDF processing
+```
+
+### `fix:` Bug Fixes
+
+Use for fixing bugs or errors:
+
+```bash
+fix: handle missing OPENROUTER_API_KEY gracefully
+fix: resolve floating-point rounding in totals
+fix: correct GST calculation for inclusive tax
+```
+
+### `docs:` Documentation
+
+Use for documentation-only changes:
+
+```bash
+docs: add product-facing comments to OCR flow
+docs: update README with new env variables
+docs: clarify reconciliation logic in comments
+```
+
+### `refactor:` Code Restructuring
+
+Use for code changes that don't add features or fix bugs:
+
+```bash
+refactor: extract reconciliation logic to separate function
+refactor: simplify invoice viewer component structure
+refactor: move type definitions to shared types file
+```
+
+### `test:` Tests
+
+Use for adding or modifying tests:
+
+```bash
+test: add reconciliation engine test cases
+test: increase coverage for invoice_v4 module
+test: add E2E tests for PDF upload flow
+```
+
+### `chore:` Maintenance
+
+Use for build process, dependencies, or tooling changes:
+
+```bash
+chore: update dependencies to latest versions
+chore: configure Vitest coverage reporting
+chore: add ESLint rule for import ordering
+```
+
+### `style:` Code Style
+
+Use for formatting, whitespace, or style changes (no code logic change):
+
+```bash
+style: format code with Prettier
+style: fix indentation in invoice viewer
+style: apply consistent spacing in API routes
+```
+
+### `perf:` Performance
+
+Use for performance improvements:
+
+```bash
+perf: optimize image processing for large files
+perf: reduce bundle size by lazy-loading components
+perf: cache reconciliation results for repeated calls
+```
+
+## Examples from Invoice OCR
+
+Here are real examples from the project:
+
+### Feature Addition
+
+```bash
+feat: add ocr-structured v4 endpoint
+```
+
+Adds a new API endpoint for structured OCR with v4 schema.
+
+### Bug Fix
+
+```bash
+fix: handle missing OPENROUTER_API_KEY
+```
+
+Improves error handling when the API key is not configured.
+
+### Documentation
+
+```bash
+docs: add product-facing comments to OCR flow
+```
+
+Adds comments explaining the OCR processing workflow.
+
+### Refactoring
+
+```bash
+refactor: extract reconciliation logic to invoice_v4 module
+```
+
+Moves reconciliation code to a separate module for better organization.
+
+### Testing
+
+```bash
+test: add comprehensive tests for invoice_v4 reconciliation
+```
+
+Adds test coverage for the reconciliation engine.
+
+## Multi-line Commits
+
+For complex changes, use the body and footer:
+
+```bash
+feat: add annotations support for v4 OCR endpoint
+
+Allows reusing OpenRouter file-parse metadata to skip re-parsing
+costs. The annotations parameter is passed through to the OpenRouter
+API with the file-parser plugin.
+
+This reduces API costs for repeated processing of the same document.
+
+Closes #78
+```
+
+### Body Guidelines
+
+- Separate from the subject with a blank line
+- Explain **what** and **why**, not **how**
+- Wrap lines at 72 characters
+- Use bullet points for multiple points
+
+### Footer Guidelines
+
+- Reference issues or PRs (e.g., "Closes #123", "Fixes #456")
+- Note breaking changes with `BREAKING CHANGE:`
+- Add co-authors with `Co-authored-by:`
+
+## Breaking Changes
+
+For changes that break backward compatibility:
+
+```bash
+feat!: change invoice schema to v4 format
+
+BREAKING CHANGE: The invoice schema has been updated to v4 format.
+Clients using the old schema must update their code to handle the
+new structure.
+
+Migration guide:
+- Update invoice type imports from @/lib/invoice to @/lib/invoice_v4
+- Replace `compact` schema references with `doc_level` format
+- Update reconciliation calls to use new API
+```
+
+Note the `!` after the type to indicate a breaking change.
+
+## Scope (Optional)
+
+You can add a scope to provide more context:
+
+```bash
+feat(api): add PDF plugin override support
+fix(ui): resolve layout shift in invoice viewer
+test(reconciliation): add edge case for zero-amount items
+docs(readme): update setup instructions
+```
+
+Common scopes in Invoice OCR:
+- `api` - API routes
+- `ui` - User interface components
+- `lib` - Business logic and utilities
+- `reconciliation` - Invoice reconciliation engine
+- `config` - Configuration files
+- `deps` - Dependencies
+
+## Tools and Automation
+
+### Commitlint (Optional)
+
+Consider using [commitlint](https://commitlint.js.org/) to enforce commit conventions:
+
+```bash
+npm install --save-dev @commitlint/cli @commitlint/config-conventional
+```
+
+### Husky (Optional)
+
+Use [Husky](https://typicode.github.io/husky/) to run checks before commits:
+
+```bash
+npm install --save-dev husky
+npx husky init
+echo "npm run lint" > .husky/pre-commit
+```
+
+## Quick Reference
+
+| Type | Description | Example |
+|------|-------------|-------|
+| `feat:` | New feature | `feat: add PDF support` |
+| `fix:` | Bug fix | `fix: handle missing API key` |
+| `docs:` | Documentation | `docs: update README` |
+| `refactor:` | Code restructuring | `refactor: simplify reconciliation` |
+| `test:` | Tests | `test: add coverage for edge cases` |
+| `chore:` | Maintenance | `chore: update dependencies` |
+| `style:` | Formatting | `style: fix indentation` |
+| `perf:` | Performance | `perf: optimize image processing` |
+
+## Best Practices
+
+1. **Be specific**: "fix: handle null values in line items" vs "fix: bug fix"
+2. **One purpose per commit**: Don't mix features and fixes
+3. **Test before committing**: Ensure code works and passes linting
+4. **Reference issues**: Link to GitHub issues when applicable
+5. **Keep it simple**: Clear messages are better than clever ones
+
+## Related Guidelines
+
+- See [Code Style Guide](/development/contributing/code-style) for coding standards
+- See [Contributing Guidelines](/development/contributing/guidelines) for PR process

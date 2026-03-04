@@ -1,0 +1,641 @@
+---
+title: 'OCR Modes'
+description: 'Understand the three OCR modes and when to use each for optimal invoice extraction'
+icon: 'layer-group'
+---
+
+## Overview
+
+Invoice OCR offers three distinct OCR modes, each optimized for different use cases. Understanding when to use each mode helps you balance accuracy, performance, and debugging needs.
+
+<CardGroup cols={3}>
+  <Card title="Raw Text" icon="align-left" href="#raw-text-mode">
+    Plain text extraction for debugging
+  </Card>
+  <Card title="Structured" icon="table" href="#structured-mode">
+    Legacy schema with basic reconciliation
+  </Card>
+  <Card title="Structured V4" icon="sparkles" href="#structured-v4-mode">
+    Advanced India GST with multi-pass reconciliation
+  </Card>
+</CardGroup>
+
+## Raw Text Mode
+
+### When to Use
+
+- **Debugging**: Verify what the model actually sees before structuring
+- **Quick inspection**: Check if text is being extracted correctly from images/PDFs
+- **Custom parsing**: Build your own structured extraction pipeline
+
+### API Endpoint
+
+```bash
+POST /api/ocr
+```
+
+### Request Format
+
+<Tabs>
+  <Tab title="Image">
+    ```json
+    {
+      "imageBase64": "data:image/png;base64,...",
+      "mimeType": "image/png",
+      "model": "openai/gpt-4o-mini" // optional
+    }
+    ```
+  </Tab>
+  <Tab title="PDF">
+    ```json
+    {
+      "pdfBase64": "data:application/pdf;base64,...",
+      "filename": "invoice.pdf",
+      "model": "google/gemini-2.0-flash",
+      "plugins": [
+        {
+          "id": "file-parser",
+          "pdf": { "engine": "pdf-text" }
+        }
+      ]
+    }
+    ```
+  </Tab>
+  <Tab title="PDF URL">
+    ```json
+    {
+      "pdfUrl": "https://example.com/invoice.pdf",
+      "model": "openai/gpt-4o-mini"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Response
+
+```json
+{
+  "text": "TAX INVOICE\nInvoice No: INV-2024-001\nDate: 15-01-2024\n..."
+}
+```
+
+### Example Usage
+
+```typescript
+const response = await fetch('/api/ocr', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    imageBase64: dataUrl,
+    mimeType: 'image/jpeg'
+  })
+});
+
+const { text } = await response.json();
+console.log(text); // Raw extracted text
+```
+
+<Note>
+  Raw OCR mode preserves line breaks and spacing but does not structure the data. Use this to verify extraction quality before attempting structured parsing.
+</Note>
+
+---
+
+## Structured Mode
+
+### When to Use
+
+- **Simple invoices**: Basic line items without complex discounts
+- **Legacy integration**: Existing systems using the compact schema
+- **After-tax discounts**: Invoices where discounts apply after GST calculation
+
+### API Endpoint
+
+```bash
+POST /api/ocr-structured
+```
+
+### Schema
+
+The legacy structured mode returns a compact schema with three main sections:
+
+```typescript
+type InvoiceDoc = {
+  voucher: {
+    invoice_number: string;
+    invoice_date: string;
+    invoice_due_date: string;
+    invoice_discount: string; // voucher-level discount
+    invoice_discount_mode: string; // "before_tax" | "after_tax"
+    round_off: string;
+    total_invoice_amount: string;
+    additional_charges?: AdditionalCharge[];
+    reconciliation?: {
+      status: "matched" | "unmatched";
+      // ... computed totals
+    };
+  };
+  items: Array<{
+    name: string;
+    price: string; // tax-exclusive
+    quantity: string;
+    unit: string;
+    hsn_sac_code: string;
+    tax_rate: string; // total GST %
+    discount_rate: string; // item-level discount %
+  }>;
+  party: {
+    party_name: string;
+    party_gstin_number: string;
+    party_address: string;
+    party_city: string;
+    party_pincode: string;
+    party_pan_number: string;
+  };
+};
+```
+
+### Reconciliation Logic
+
+The structured mode tries multiple assumptions to match the printed total:
+
+<Accordion title="Discount Mode Assumptions">
+  1. **Before Tax**: Voucher discount reduces taxable amount before GST calculation
+  2. **After Tax**: Voucher discount applies to the final amount after GST
+
+  The reconciliation engine tries both modes and picks the one with the smallest difference vs. the printed total.
+</Accordion>
+
+<Accordion title="Charges Interpretation">
+  Additional charges (Freight, Packing, etc.) can be:
+  - **Inclusive**: `amount` includes GST → derive taxable and tax amounts
+  - **Exclusive**: `amount` is pre-tax → add GST on top
+
+  The engine tests both interpretations to find the best match.
+</Accordion>
+
+### Response Example
+
+```json
+{
+  "voucher": {
+    "invoice_number": "AST/1501/B2C25",
+    "invoice_date": "14-10-2025",
+    "invoice_discount": "0",
+    "invoice_discount_mode": "before_tax",
+    "round_off": "0.10",
+    "total_invoice_amount": "1245",
+    "reconciliation": {
+      "status": "matched",
+      "method": {
+        "discount_mode": "before_tax",
+        "charges_inclusive": false
+      },
+      "computed_grand_total": "1245.00",
+      "difference": "0.00"
+    }
+  },
+  "items": [
+    {
+      "name": "Quick Heal-IER 1-Int Essential-1 User",
+      "price": "250",
+      "quantity": "1",
+      "unit": "NOS",
+      "hsn_sac_code": "8523",
+      "tax_rate": "18",
+      "discount_rate": "0"
+    }
+  ],
+  "party": {
+    "party_name": "ASTER DISTRIBUTORS",
+    "party_gstin_number": "32ABDFA4059P1ZA"
+  }
+}
+```
+
+<Warning>
+  Structured mode does not handle:
+  - Multiple sequential discounts (d1%, d2%)
+  - Flat per-unit discounts
+  - Header-level discount allocation by GST bucket
+  - HSN tax table anchoring
+
+  For these features, use **Structured V4** mode.
+</Warning>
+
+---
+
+## Structured V4 Mode
+
+### When to Use
+
+- **India GST compliance**: Full HSN/SAC support with CGST/SGST/IGST splits
+- **Complex discounts**: Multiple cascading discounts, flat discounts, header discounts
+- **Multi-page PDFs**: Process invoices spanning multiple pages with tax tables
+- **High accuracy**: Multi-pass reconciliation with printed anchor matching
+
+### API Endpoint
+
+```bash
+POST /api/ocr-structured-v4
+```
+
+### Key Features
+
+<CardGroup cols={2}>
+  <Card title="Multi-Pass Reconciliation" icon="arrows-rotate">
+    Tests multiple price mode interpretations (WITH_TAX, WITHOUT_TAX) and picks the best match
+  </Card>
+  <Card title="HSN Tax Table Anchoring" icon="anchor">
+    Scales item buckets to match printed per-rate taxable values when HSN table exists
+  </Card>
+  <Card title="Smart Discount Allocation" icon="percent">
+    Allocates header discounts intelligently across GST rate buckets to match printed GST total
+  </Card>
+  <Card title="CGST/SGST/IGST Split" icon="code-branch">
+    Automatically determines intra vs. inter-state tax split based on GSTIN state codes
+  </Card>
+</CardGroup>
+
+### Schema
+
+The V4 schema provides comprehensive invoice representation:
+
+```typescript
+type V4Doc = {
+  doc_level: {
+    supplier_name: string;
+    supplier_gstin: string;
+    invoice_number: string;
+    invoice_date: string; // YYYY-MM-DD
+    place_of_supply_state_code: string;
+    buyer_gstin: string;
+    currency: string; // "INR"
+  };
+  items: Array<{
+    name: string;
+    hsn: string;
+    qty: number;
+    uom: string; // normalized UQC code
+    rate_ex_tax: number;
+    discount: {
+      d1_pct: number | null; // first discount %
+      d2_pct: number | null; // second discount %
+      flat_per_unit: number | null; // flat ₹ per unit
+      effective_pct: number; // combined discount %
+      amount: number; // total discount ₹
+    };
+    gst: {
+      rate: number; // normalized to GST slab
+      cgst: number;
+      sgst: number;
+      igst: number;
+      amount: number;
+    };
+    totals: {
+      line_ex_tax: number;
+      line_inc_tax: number;
+    };
+    raw?: {
+      rate_printed: number | null;
+      price_mode_detected: "WITH_TAX" | "WITHOUT_TAX";
+      // ... other raw OCR hints
+    };
+    confidence: number;
+  }>;
+  header_discounts: Array<{
+    label: string;
+    type: "PERCENT" | "ABSOLUTE";
+    value: number;
+    order: number; // sequential application
+  }>;
+  charges: Array<{
+    label: string;
+    ex_tax: number;
+    gst_rate_hint: number | null;
+    gst_amount: number;
+    inc_tax: number;
+    taxable: boolean;
+  }>;
+  tcs: {
+    rate: number;
+    amount: number;
+    base_used: string;
+  };
+  round_off: number;
+  totals: {
+    items_ex_tax: number;
+    header_discounts_ex_tax: number;
+    charges_ex_tax: number;
+    taxable_ex_tax: number;
+    gst_total: number;
+    grand_total: number;
+  };
+  printed: {
+    taxable_subtotal: number | null;
+    gst_total: number | null;
+    hsn_tax_table: Array<{
+      hsn?: string;
+      taxable_value?: number;
+      cgst_rate?: number;
+      sgst_rate?: number;
+      igst_rate?: number;
+      cgst_amount?: number;
+      sgst_amount?: number;
+      igst_amount?: number;
+    }>;
+    grand_total: number | null;
+  };
+  reconciliation: {
+    error_absolute: number; // difference vs. printed total
+    alternates_considered: string[];
+    warnings: string[];
+  };
+  meta: {
+    pages_processed: number;
+    language: string;
+    overall_confidence: number;
+  };
+};
+```
+
+### Request Format
+
+<Tabs>
+  <Tab title="Basic">
+    ```json
+    {
+      "imageBase64": "data:image/jpeg;base64,...",
+      "mimeType": "image/jpeg",
+      "model": "google/gemini-2.0-flash"
+    }
+    ```
+  </Tab>
+  <Tab title="With Annotations">
+    ```json
+    {
+      "pdfBase64": "data:application/pdf;base64,...",
+      "filename": "invoice.pdf",
+      "annotations": {
+        // Pass-through from previous OpenRouter response
+        // to avoid re-parsing costs
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Custom PDF Engine">
+    ```json
+    {
+      "pdfBase64": "data:application/pdf;base64,...",
+      "plugins": [
+        {
+          "id": "file-parser",
+          "pdf": { "engine": "mistral-ocr" }
+        }
+      ]
+    }
+    ```
+    Available engines: `pdf-text`, `mistral-ocr`, `native`
+  </Tab>
+</Tabs>
+
+### Response Example
+
+```json
+{
+  "doc_level": {
+    "supplier_name": "Tech Solutions Pvt Ltd",
+    "supplier_gstin": "27AABCT1234M1Z5",
+    "invoice_number": "INV-2024-001",
+    "invoice_date": "2024-01-15",
+    "place_of_supply_state_code": "27",
+    "buyer_gstin": "27XYZAB5678N2Z1",
+    "currency": "INR"
+  },
+  "items": [
+    {
+      "name": "Laptop - Dell Inspiron 15",
+      "hsn": "8471",
+      "qty": 2,
+      "uom": "NOS",
+      "rate_ex_tax": 45000.00,
+      "discount": {
+        "d1_pct": 10,
+        "d2_pct": 5,
+        "flat_per_unit": null,
+        "effective_pct": 14.50,
+        "amount": 13050.00
+      },
+      "gst": {
+        "rate": 18,
+        "cgst": 13851.00,
+        "sgst": 13851.00,
+        "igst": 0,
+        "amount": 27702.00
+      },
+      "totals": {
+        "line_ex_tax": 76950.00,
+        "line_inc_tax": 104652.00
+      },
+      "raw": {
+        "rate_printed": 45000,
+        "price_mode_detected": "WITHOUT_TAX"
+      },
+      "confidence": 0.95
+    }
+  ],
+  "header_discounts": [
+    {
+      "label": "Trade Discount",
+      "type": "PERCENT",
+      "value": 2.00,
+      "order": 1
+    }
+  ],
+  "charges": [
+    {
+      "label": "Freight",
+      "ex_tax": 500.00,
+      "gst_rate_hint": 18,
+      "gst_amount": 90.00,
+      "inc_tax": 590.00,
+      "taxable": true
+    }
+  ],
+  "totals": {
+    "items_ex_tax": 76950.00,
+    "header_discounts_ex_tax": 1539.00,
+    "charges_ex_tax": 500.00,
+    "taxable_ex_tax": 75911.00,
+    "gst_total": 13664.00,
+    "grand_total": 89575.00
+  },
+  "printed": {
+    "taxable_subtotal": 75911.00,
+    "gst_total": 13664.00,
+    "hsn_tax_table": [
+      {
+        "hsn": "8471",
+        "taxable_value": 75911.00,
+        "cgst_rate": 9,
+        "sgst_rate": 9,
+        "cgst_amount": 6832.00,
+        "sgst_amount": 6832.00
+      }
+    ],
+    "grand_total": 89575.00
+  },
+  "reconciliation": {
+    "error_absolute": 0.00,
+    "alternates_considered": [
+      "as_is:err=0.00,implied_round=0.00,score=0.00",
+      "from_printed_with_tax:err=125.50,implied_round=125.50,score=251.00"
+    ],
+    "warnings": []
+  },
+  "meta": {
+    "pages_processed": 1,
+    "language": "en",
+    "overall_confidence": 0.92
+  }
+}
+```
+
+<Tip>
+  The `reconciliation.alternates_considered` array shows all hypothesis tests performed. The engine picks the interpretation with the lowest error and most reasonable round-off (≤ ₹1.02).
+</Tip>
+
+---
+
+## Mode Comparison
+
+<table>
+  <thead>
+    <tr>
+      <th>Feature</th>
+      <th>Raw Text</th>
+      <th>Structured</th>
+      <th>Structured V4</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>**Text Extraction**</td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
+    </tr>
+    <tr>
+      <td>**JSON Schema**</td>
+      <td>❌</td>
+      <td>✅ (Compact)</td>
+      <td>✅ (Normalized)</td>
+    </tr>
+    <tr>
+      <td>**Reconciliation**</td>
+      <td>❌</td>
+      <td>✅ (Basic)</td>
+      <td>✅ (Multi-pass)</td>
+    </tr>
+    <tr>
+      <td>**India GST Support**</td>
+      <td>❌</td>
+      <td>⚠️ (Partial)</td>
+      <td>✅ (Full)</td>
+    </tr>
+    <tr>
+      <td>**HSN/SAC Codes**</td>
+      <td>❌</td>
+      <td>✅</td>
+      <td>✅ + Table anchoring</td>
+    </tr>
+    <tr>
+      <td>**CGST/SGST/IGST Split**</td>
+      <td>❌</td>
+      <td>❌</td>
+      <td>✅ (Automatic)</td>
+    </tr>
+    <tr>
+      <td>**Multiple Discounts**</td>
+      <td>❌</td>
+      <td>❌</td>
+      <td>✅ (Sequential)</td>
+    </tr>
+    <tr>
+      <td>**Header Discounts**</td>
+      <td>❌</td>
+      <td>✅</td>
+      <td>✅ + Smart allocation</td>
+    </tr>
+    <tr>
+      <td>**Multi-page PDFs**</td>
+      <td>✅</td>
+      <td>⚠️</td>
+      <td>✅ (Optimized)</td>
+    </tr>
+    <tr>
+      <td>**Confidence Scores**</td>
+      <td>❌</td>
+      <td>❌</td>
+      <td>✅</td>
+    </tr>
+    <tr>
+      <td>**Use Case**</td>
+      <td>Debugging</td>
+      <td>Simple invoices</td>
+      <td>Production GST</td>
+    </tr>
+  </tbody>
+</table>
+
+---
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Start with Raw Text for Unknown Formats">
+    When processing invoices from a new vendor or format:
+    1. Call `/api/ocr` to verify text extraction quality
+    2. Check if all important fields are visible in the raw text
+    3. If text is missing, try different PDF engines (`pdf-text`, `mistral-ocr`, `native`)
+    4. Once satisfied, switch to structured V4 for production
+  </Accordion>
+
+  <Accordion title="Use Structured V4 for Production">
+    For India GST invoices in production:
+    - Always use `/api/ocr-structured-v4`
+    - Provides the most accurate reconciliation
+    - Handles edge cases like HSN tax tables, multi-discount structures
+    - Returns confidence scores for validation
+  </Accordion>
+
+  <Accordion title="Leverage Annotations for PDFs">
+    When processing large PDFs:
+    1. First request parses the PDF (slow, costs more)
+    2. OpenRouter returns `annotations` in the response
+    3. Subsequent requests with same PDF + annotations skip re-parsing
+    4. Significant cost and latency savings for iterative processing
+  </Accordion>
+
+  <Accordion title="Monitor Reconciliation Errors">
+    Check `reconciliation.error_absolute` in V4 responses:
+    - **≤ ₹0.05**: Perfect match, high confidence
+    - **₹0.05 - ₹1.00**: Acceptable, likely rounding differences
+    - **> ₹1.00**: Review required, possible extraction issues
+
+    Use `reconciliation.alternates_considered` to debug why specific interpretations were chosen.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Related Topics
+
+<CardGroup cols={2}>
+  <Card title="Reconciliation Engine" icon="calculator" href="/features/reconciliation-engine">
+    Deep dive into V4 reconciliation logic
+  </Card>
+  <Card title="PDF Support" icon="file-pdf" href="/features/pdf-support">
+    Configure PDF parsing engines and optimize performance
+  </Card>
+</CardGroup>

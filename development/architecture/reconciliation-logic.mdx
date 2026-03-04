@@ -1,0 +1,534 @@
+---
+title: Reconciliation Logic
+description: Deep dive into the v4 reconciliation engine algorithm and edge cases
+---
+
+## Overview
+
+The v4 reconciliation engine (`lib/invoice_v4.ts`) transforms raw OCR output into mathematically consistent invoice data. It handles ambiguous pricing modes, applies sequential discounts, normalizes GST rates to standard slabs, and reconciles computed totals against printed anchors.
+
+**Core principle**: Trust printed anchors (HSN table, taxable subtotal, grand total) as ground truth, then work backwards to adjust line items and discounts.
+
+## Reconciliation Pipeline
+
+```
+┌──────────────────────────────────────────────┐
+│  1. Recompute Item Lines                     │
+│     - Choose best line_ex_tax source         │
+│     - Normalize GST rate to slab             │
+│     - Split CGST/SGST vs IGST                │
+└────────────┬─────────────────────────────────┘
+             │
+             ▼
+┌──────────────────────────────────────────────┐
+│  2. Apply Header Discounts                   │
+│     - Sequential % and absolute discounts    │
+│     - Allocate to GST buckets                │
+└────────────┬─────────────────────────────────┘
+             │
+             ▼
+┌──────────────────────────────────────────────┐
+│  3. Anchor to Printed Values                 │
+│     - Scale items to match HSN tax table     │
+│     - Or nudge toward printed taxable total  │
+└────────────┬─────────────────────────────────┘
+             │
+             ▼
+┌──────────────────────────────────────────────┐
+│  4. Process Charges                          │
+│     - Infer GST rate if missing              │
+│     - Decide if non-taxable charges included │
+└────────────┬─────────────────────────────────┘
+             │
+             ▼
+┌──────────────────────────────────────────────┐
+│  5. Compute Totals                           │
+│     - Taxable ex-tax, GST, TCS, round-off    │
+│     - Final grand total                      │
+└────────────┬─────────────────────────────────┘
+             │
+             ▼
+┌──────────────────────────────────────────────┐
+│  6. Calculate Error                          │
+│     - Absolute difference vs printed total   │
+│     - Try alternate hypotheses if needed     │
+└──────────────────────────────────────────────┘
+```
+
+## Phase 1: Item Line Recomputation
+
+Location: `lib/invoice_v4.ts:136-241`
+
+### Choosing Line Ex-Tax
+
+**The problem**: OCR may provide multiple sources for the same value:
+- Computed from `qty × rate_ex_tax × (1 - discounts)`
+- Printed line amount (may include or exclude tax)
+- Model-provided `amount_ex_tax_after_discount`
+
+**The solution** (`lib/invoice_v4.ts:149-205`):
+
+```typescript
+// Step 1: Compute from rate and discounts
+const afterPct = rateEx * (1 - (n(d1) / 100)) * (1 - (n(d2) / 100));
+const afterFlat = Math.max(afterPct - n(flat), 0);
+const computedLineEx = afterFlat * qty;
+
+// Step 2: Interpret printed amount based on price mode
+const printedLineEx = printedAsExTax
+  ? printedAmt
+  : (printedAsWithTax ? (printedAmt / (1 + gstRate / 100)) : 0);
+
+// Step 3: Model's explicit ex-tax value
+const modelLineEx = n(it.raw?.amount_ex_tax_after_discount);
+
+// Step 4: Choose best value with discount detection
+let lineEx = 0;
+const baseGross = qty * rateEx;
+const hasDiscount = (n(it.discount?.d1_pct) > 0 || ...);
+const tol = 0.05;
+
+if (printedLineEx > 0) {
+  if (hasDiscount && Math.abs(printedLineEx - baseGross) <= tol) {
+    // Printed looks like pre-discount; prefer computed discounted value
+    lineEx = computedLineEx > 0 ? computedLineEx : (modelLineEx > 0 ? modelLineEx : printedLineEx);
+  } else {
+    // Trust printed but cap at computed discount
+    lineEx = Math.min(printedLineEx, computedLineEx || printedLineEx);
+  }
+} else if (modelLineEx > 0) {
+  lineEx = modelLineEx;
+} else {
+  lineEx = computedLineEx;
+}
+```
+
+### GST Normalization
+
+Location: `lib/standards.ts:15-38`
+
+**GST slabs**: `[0, 0.25, 3, 5, 12, 18, 28]`
+
+```typescript
+export function normalizeGstRate(input: unknown): number {
+  let rate = /* parse from string or number */;
+  
+  // If fraction (0.28 for 28%), scale to percent
+  if (rate > 0 && rate <= 1.5) rate = rate * 100;
+  
+  // Snap to nearest slab within 0.75% tolerance
+  const nearest = GST_SLABS.reduce((prev, s) =>
+    Math.abs(rate - s) < Math.abs(rate - prev) ? s : prev
+  );
+  if (Math.abs(rate - nearest) <= 0.75) return nearest;
+  
+  // Otherwise clamp to 0..100
+  return Math.max(0, Math.min(100, Math.round(rate * 100) / 100));
+}
+```
+
+**Example**:
+- Input: `17.8` → Snap to `18`
+- Input: `0.28` → Scale to `28`, snap to `28`
+- Input: `19.5` → No slab match, return `19.5`
+
+### CGST/SGST vs IGST Split
+
+Location: `lib/invoice_v4.ts:140-148`
+
+**Intra-state** (supplier state == place of supply):
+```typescript
+if (isIntra === true) {
+  cgst: r2(gstAmt / 2),
+  sgst: r2(gstAmt / 2),
+  igst: 0
+}
+```
+
+**Inter-state**:
+```typescript
+if (isIntra === false) {
+  cgst: 0,
+  sgst: 0,
+  igst: r2(gstAmt)
+}
+```
+
+State codes extracted from first 2 characters of GSTIN (`lib/standards.ts:165-170`).
+
+## Phase 2: Header Discounts
+
+Location: `lib/invoice_v4.ts:245-332`
+
+### Sequential Application
+
+**Rule**: Apply in `order` field, multiplicatively for percents.
+
+```typescript
+const ordered = [...(out.header_discounts || [])].sort((a, b) => n(a.order) - n(b.order));
+
+const applyPercent = (pct: number) => {
+  const f = 1 - pct / 100;
+  for (const k of Object.keys(bucketEx)) bucketEx[k] = r2(bucketEx[k] * f);
+  const cut = r2(baseEx * (pct / 100));
+  baseEx = r2(baseEx - cut);
+  headerDiscEx = r2(headerDiscEx + cut);
+};
+
+const applyAbsolute = (amt: number) => {
+  const total = Object.values(bucketEx).reduce((s, v) => s + v, 0) || 1;
+  for (const k of Object.keys(bucketEx)) {
+    const share = bucketEx[k] / total;
+    bucketEx[k] = r2(Math.max(0, bucketEx[k] - amt * share));
+  }
+  baseEx = r2(Math.max(0, baseEx - amt));
+  headerDiscEx = r2(headerDiscEx + amt);
+};
+```
+
+**Example**:
+- Items ex-tax: ₹1000 (18% bucket: ₹600, 12% bucket: ₹400)
+- Discount 1: 10% → ₹900 (18%: ₹540, 12%: ₹360)
+- Discount 2: ₹50 absolute → ₹850 (split 540/900 and 360/900: ~₹33.33 and ~₹16.67)
+
+### Smart Allocation to GST Buckets
+
+Location: `lib/invoice_v4.ts:270-327`
+
+When a printed GST total exists, absolute discounts are allocated greedily to buckets matching the target effective tax rate.
+
+```typescript
+const allocateAbsoluteSmart = (amt: number, targetItemsGst: number | null) => {
+  // Current weighted avg GST rate from buckets
+  const S = entries.reduce((s, e) => s + e.rate * e.ex, 0);
+  const currentItemsGst = S / 100;
+  
+  let remainingW = r2((currentItemsGst - n(targetItemsGst)) * 100);
+  // Need to reduce sum(rate * ex) by remainingW
+  
+  // Greedy: pick bucket with rate closest to k = remainingW / remainingAmt
+  while (remainingAmt > 0.0001 && remainingW > 0.01) {
+    const k = remainingW / remainingAmt;
+    let pick = /* bucket with minimal |rate - k| and capacity > 0 */;
+    const take = Math.min(remainingAmt, capacity[pick]);
+    // Apply reduction to that bucket
+    bucketEx[String(pick)] = r2(bucketEx[String(pick)] - take);
+    remainingAmt -= take;
+    remainingW -= pick * take;
+  }
+};
+```
+
+**Why?** Some invoices print a separate GST summary that doesn't match line-by-line calculations. This algorithm adjusts discounts to hit the exact printed GST total.
+
+## Phase 3: Anchor to Printed Values
+
+Location: `lib/invoice_v4.ts:334-450`
+
+### HSN Tax Table Scaling
+
+**Priority 1**: If printed HSN table exists, scale items to match exactly.
+
+```typescript
+for (const [rateStr, target] of Object.entries(printedBucketByRate)) {
+  const idxs = rateToIdx[rateStr] || [];
+  const current = idxs.reduce((s, i) => s + n(out.items[i]?.totals?.line_ex_tax), 0);
+  if (idxs.length === 0 || current <= 0) continue;
+  
+  const scale = target / current;
+  for (const i of idxs) {
+    const it = out.items[i];
+    const oldEx = n(it.totals?.line_ex_tax);
+    const newEx = r2(oldEx * scale);
+    // Update GST, totals, discounts accordingly
+  }
+}
+```
+
+**Example**:
+- Printed HSN table: 18% bucket = ₹10,000
+- Computed 18% items = ₹10,050
+- Scale factor = 10000 / 10050 = 0.9950
+- All 18% items scaled down by 0.5%
+
+### Printed Taxable Subtotal Fallback
+
+Location: `lib/invoice_v4.ts:419-449`
+
+If no HSN table, use printed `taxable_subtotal`:
+
+```typescript
+const printedTaxable = n(out.printed?.taxable_subtotal);
+if (printedTaxable > 0) {
+  const draftChargesTaxable = (out.charges || []).reduce(...);
+  const targetItemsOnly = r2(Math.max(0, printedTaxable - draftChargesTaxable));
+  const chosenTarget = preferItemsOnly ? targetItemsOnly : printedTaxable;
+  
+  const cut = r2(baseEx - chosenTarget);
+  if (cut > 0.75) {
+    allocateAbsoluteSmart(cut, targetItemsGst);
+  }
+}
+```
+
+**Heuristic**: If charges exist and are likely included in `taxable_subtotal`, subtract them first.
+
+## Phase 4: Charges Processing
+
+Location: `lib/invoice_v4.ts:452-477`
+
+### GST Rate Inference
+
+```typescript
+const weightedRate = (() => {
+  const totalEx = out.items.reduce((s, i) => s + n(i.totals?.line_ex_tax), 0) || 1;
+  const totalGst = out.items.reduce((s, i) => s + n(i.gst?.amount), 0);
+  return (totalGst / totalEx) * 100;
+})();
+
+out.charges = (out.charges || []).map((c) => {
+  const ex = r2(n(c.ex_tax));
+  const isTaxable = !!c.taxable;
+  const rate = isTaxable ? (c.gst_rate_hint != null ? n(c.gst_rate_hint) : weightedRate) : 0;
+  const gst = r2(ex * (rate / 100));
+  // ...
+});
+```
+
+**Example**:
+- Items: ₹10,000 ex-tax, ₹1,800 GST → weighted rate = 18%
+- Freight charge: ₹500, taxable=true, no rate hint → infer 18%
+
+### Non-Taxable Charges Decision
+
+Location: `lib/invoice_v4.ts:479-521`
+
+Some invoices exclude non-taxable charges (e.g., packing materials) from the grand total. The engine tries both:
+
+```typescript
+const decideIncludeNonTaxable = (): boolean => {
+  const mode = opts.nonTaxableChargesMode || "auto";
+  if (mode === "include") return true;
+  if (mode === "exclude") return false;
+  
+  // Auto: pick option minimizing error vs printed grand total
+  const final_incl = r2(taxableEx_incl + gstTot + tcsAmount_incl + roundOff);
+  const final_excl = r2(taxableEx_excl + gstTot + tcsAmount_excl + roundOff);
+  const err_incl = Math.abs(r2(final_incl - printedGrand));
+  const err_excl = Math.abs(r2(final_excl - printedGrand));
+  
+  return err_excl < err_incl ? false : true;
+};
+```
+
+## Phase 5: Totals Computation
+
+Location: `lib/invoice_v4.ts:479-566`
+
+### Calculation Order
+
+```typescript
+// 1. Taxable ex-tax (items - header discounts + charges)
+const taxableEx = r2(baseEx + chargesEx + (includeNonTaxable ? nonTaxableChargesEx : 0));
+
+// 2. GST from buckets (rate × ex-tax per slab)
+let gstTotalBuckets = 0;
+for (const [rateStr, ex] of Object.entries(bucketEx)) {
+  const rate = parseFloat(rateStr);
+  gstTotalBuckets += ex * (rate / 100);
+}
+const totalGst = r2(gstTotalBuckets);
+
+// 3. Grand total before TCS and round-off
+let grandBeforeTcs = r2(taxableEx + totalGst);
+
+// 4. TCS (Tax Collected at Source) if rate > 0
+let tcsAmount = n(out.tcs?.amount);
+if (n(out.tcs?.rate) > 0 && tcsAmount === 0) {
+  tcsAmount = r2(grandBeforeTcs * (n(out.tcs.rate) / 100));
+}
+const grandAfterTcs = r2(grandBeforeTcs + tcsAmount);
+
+// 5. Round-off applied last (do NOT force match)
+const finalGrand = r2(grandAfterTcs + roundOff);
+```
+
+### Round-Off Philosophy
+
+Location: `lib/invoice_v4.ts:543-544`
+
+```typescript
+// Do NOT override to "force match". Keep provided round_off and compute error.
+const finalGrand = r2(grandAfterTcs + roundOff);
+```
+
+**Why?** Round-off should be small (≤ ₹1.00 typically). Large adjustments indicate a reconciliation error, not a rounding issue. Report the error honestly.
+
+## Phase 6: Multiple Hypotheses
+
+Location: `lib/invoice_v4.ts:587-641`
+
+### Alternate Scenarios
+
+The `reconcileV4` function tries 4 hypotheses:
+
+```typescript
+const candidates: Candidate[] = [
+  { name: "as_is", doc: recomputeDoc(input, { preferItemsOnlyWhenNoHSN: false }) },
+  { name: "as_is_items_only_when_no_hsn", doc: recomputeDoc(input, { preferItemsOnlyWhenNoHSN: true }) },
+  { name: "from_printed_with_tax", doc: rerateFromPrinted(input, "WITH_TAX", { preferItemsOnlyWhenNoHSN: true }) },
+  { name: "from_printed_without_tax", doc: rerateFromPrinted(input, "WITHOUT_TAX", { preferItemsOnlyWhenNoHSN: true }) },
+];
+```
+
+**Rationale**:
+1. **as_is**: Use model's rate interpretation
+2. **items_only_when_no_hsn**: Exclude charges from taxable subtotal anchor
+3. **from_printed_with_tax**: Reinterpret printed rate as tax-inclusive
+4. **from_printed_without_tax**: Reinterpret as tax-exclusive
+
+### Scoring
+
+Location: `lib/invoice_v4.ts:598-607`
+
+```typescript
+const scoreOf = (c: Candidate) => {
+  const computedNoRound = r2((n(d.totals?.grand_total) - n(d.round_off)));
+  const impliedRound = printedGrand > 0 ? r2(printedGrand - computedNoRound) : n(d.round_off);
+  const err = c.errorAbs;
+  const roundPenalty = Math.max(0, Math.abs(impliedRound) - 1); // prefer |round_off| <= 1
+  const score = r2(err + roundPenalty);
+  return { score, impliedRound };
+};
+```
+
+**Best hypothesis**: Lowest score, tie-break by smaller implied round-off.
+
+### Round-Off Adoption
+
+Location: `lib/invoice_v4.ts:624-632`
+
+```typescript
+if (printedGrand > 0 && Math.abs(bestMeta.impliedRound) <= 1.02) {
+  out.round_off = r2(bestMeta.impliedRound);
+  const recomputed = recomputeDoc(out);
+  Object.assign(out, recomputed);
+}
+```
+
+If implied round-off is reasonable (≤ ₹1.02), adopt it and recompute once more for final precision.
+
+## Edge Cases
+
+### Case 1: Pre-Discount Amount Printed
+
+Location: `lib/invoice_v4.ts:184-200`
+
+**Problem**: Invoice prints `Qty × Rate` in the Amount column even when discount exists.
+
+**Solution**:
+```typescript
+if (hasDiscount && Math.abs(printedLineEx - baseGross) <= tol) {
+  // Printed looks like pre-discount; prefer computed discounted value
+  lineEx = computedLineEx > 0 ? computedLineEx : modelLineEx;
+}
+```
+
+### Case 2: Charges in Taxable Subtotal
+
+Location: `lib/invoice_v4.ts:421-432`
+
+**Problem**: Some layouts include freight/packing in "Total Taxable Value", others don't.
+
+**Solution**: Try both interpretations, pick lower error:
+```typescript
+const targetItemsOnly = r2(Math.max(0, printedTaxable - draftChargesTaxable));
+const preferItemsOnly = opts.preferItemsOnlyWhenNoHSN === true ? true : (draftChargesTaxable > 0);
+const chosenTarget = preferItemsOnly ? targetItemsOnly : printedTaxable;
+```
+
+### Case 3: Mixed Intra/Inter-State
+
+Location: `lib/invoice_v4.ts:140-148`
+
+**Problem**: Supplier and buyer in different states but place of supply ambiguous.
+
+**Solution**: Fall back to buyer GSTIN if `place_of_supply_state_code` missing:
+```typescript
+const posCode = (() => {
+  const fromPos = parseInt(String(out.doc_level?.place_of_supply_state_code || "").slice(0, 2), 10);
+  if (Number.isFinite(fromPos)) return fromPos;
+  const fromBuyer = getStateCodeFromGstin(out.doc_level?.buyer_gstin);
+  return fromBuyer ?? null;
+})();
+```
+
+### Case 4: HSN Table Missing Rates
+
+Location: `lib/invoice_v4.ts:349-361`
+
+**Problem**: HSN table has `taxable_value` but no explicit `cgst_rate`/`sgst_rate`/`igst_rate`.
+
+**Solution**: Infer from tax amounts:
+```typescript
+if (r === 0 && ex > 0) {
+  const taxAmt = n(row?.cgst_amount) + n(row?.sgst_amount) + n(row?.igst_amount);
+  if (taxAmt > 0) {
+    r = normalizeGstRate((taxAmt / ex) * 100);
+  }
+}
+```
+
+### Case 5: TCS on Which Base?
+
+Location: `lib/invoice_v4.ts:535-539`
+
+**Problem**: TCS may apply to subtotal before or after non-taxable charges.
+
+**Solution**: The `decideIncludeNonTaxable` logic already accounts for this by trying both.
+
+## Debugging Output
+
+Location: `lib/invoice_v4.ts:634-638`
+
+```typescript
+out.reconciliation.alternates_considered = candidates.map((c) => {
+  const m = scoreOf(c);
+  return `${c.name}:err=${c.errorAbs.toFixed(2)},implied_round=${m.impliedRound.toFixed(2)},score=${m.score.toFixed(2)}`;
+});
+```
+
+**Example trace**:
+```
+[
+  "as_is:err=12.50,implied_round=0.00,score=12.50",
+  "from_printed_without_tax:err=0.05,implied_round=0.45,score=0.05",
+  ...
+]
+```
+
+Shown in UI: `components/invoice-viewer-v4.tsx:215-219`
+
+## Performance Characteristics
+
+- **Time complexity**: O(n × k) where n = items, k = candidates (fixed at 4)
+- **Space complexity**: O(n) for item cloning per candidate
+- **Typical runtime**: under 10ms for 50-item invoices on modern hardware
+
+## Testing
+
+Location: `lib/__tests__/invoice_v4.test.ts`
+
+**Coverage**:
+- Basic reconciliation (matched totals)
+- Price mode detection (WITH_TAX vs WITHOUT_TAX)
+- Sequential discounts
+- HSN table scaling
+- CGST/SGST vs IGST split
+- Non-taxable charges inclusion/exclusion
+
+## Next Steps
+
+- [OCR Processing Flow](/development/architecture/ocr-flow) - End-to-end pipeline
+- [OpenRouter Integration](/development/architecture/openrouter-integration) - API setup
+- [Testing Guide](/development/testing) - Writing reconciliation tests

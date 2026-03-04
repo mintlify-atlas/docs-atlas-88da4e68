@@ -1,0 +1,651 @@
+---
+title: OpenRouter Integration
+description: How the OpenRouter API is integrated including headers, plugins, and response handling
+---
+
+## Overview
+
+Invoice OCR uses [OpenRouter](https://openrouter.ai/) as the LLM gateway, providing access to models from OpenAI, Google, Anthropic, and others through a unified API. OpenRouter handles:
+
+- **Model routing**: Single endpoint for 100+ models
+- **PDF parsing**: Built-in plugins for document extraction
+- **Caching**: Annotation system to avoid re-parsing
+- **Fallbacks**: Automatic retry with alternate providers
+
+## API Endpoint
+
+**Base URL**: `https://openrouter.ai/api/v1/chat/completions`
+
+**Compatibility**: OpenAI-compatible chat completions format
+
+## Authentication
+
+Location: `app/api/ocr-structured-v4/route.ts:215-221`
+
+```typescript
+const apiKey = process.env.OPENROUTER_API_KEY;
+if (!apiKey) {
+  return NextResponse.json(
+    { error: "Server missing OPENROUTER_API_KEY" },
+    { status: 500 }
+  );
+}
+```
+
+**Setup**:
+1. Sign up at [openrouter.ai](https://openrouter.ai/)
+2. Generate API key from dashboard
+3. Add to `.env.local`:
+   ```bash
+   OPENROUTER_API_KEY=sk-or-v1-...
+   ```
+
+## Request Headers
+
+Location: `app/api/ocr-structured-v4/route.ts:282-288`
+
+```typescript
+const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+    "HTTP-Referer": site,     // Optional: your site URL
+    "X-Title": title,          // Optional: app name for tracking
+  },
+  body: JSON.stringify(payload),
+});
+```
+
+### Required Headers
+
+| Header | Value | Purpose |
+|--------|-------|----------|
+| `Content-Type` | `application/json` | Standard REST API |
+| `Authorization` | `Bearer ${OPENROUTER_API_KEY}` | Authentication |
+
+### Optional Headers
+
+| Header | Environment Variable | Default | Purpose |
+|--------|---------------------|---------|----------|
+| `HTTP-Referer` | `OPENROUTER_SITE_URL` | `http://localhost:3000` | Usage tracking, required for some models |
+| `X-Title` | `OPENROUTER_APP_NAME` | `Invoice OCR` | App identifier in OpenRouter dashboard |
+
+**Note**: Some models (e.g., Google's) require `HTTP-Referer` for attribution.
+
+## Request Payload
+
+Location: `app/api/ocr-structured-v4/route.ts:228-254`
+
+### Basic Structure
+
+```typescript
+const payload: Record<string, unknown> = {
+  model: "google/gemini-2.5-flash",
+  temperature: 0,  // Deterministic output
+  response_format: { type: "json_object" },  // Force JSON mode
+  messages: [
+    { role: "system", content: SYSTEM_PROMPT },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "Return ONLY JSON matching the provided schema." },
+        // Image or file attachment
+      ],
+    },
+  ],
+};
+```
+
+### Model Selection
+
+Location: `app/api/ocr-structured-v4/route.ts:223-224`
+
+```typescript
+const fallback = process.env.OPENROUTER_MODEL || "google/gemini-2.0-flash";
+const model = body.model || fallback;
+```
+
+**Available models** (partial list):
+
+| Model ID | Provider | Cost (per 1M tokens) | Best For |
+|----------|----------|---------------------|----------|
+| `google/gemini-2.5-flash` | Google | ~$0.07 input | **Default**: Fast, accurate, cheap |
+| `google/gemini-2.0-flash` | Google | ~$0.05 input | Legacy fallback |
+| `openai/gpt-4o-mini` | OpenAI | ~$0.15 input | Structured output |
+| `openai/o3-mini` | OpenAI | ~$1.00 input | Complex reasoning |
+| `anthropic/claude-3.5-sonnet` | Anthropic | ~$3.00 input | High-quality extraction |
+
+Full list: [OpenRouter Models](https://openrouter.ai/models)
+
+### Temperature
+
+Location: `app/api/ocr-structured-v4/route.ts:230`
+
+```typescript
+temperature: 0
+```
+
+**Why 0?** OCR extraction should be deterministic—same input → same output. No creativity needed.
+
+### Response Format
+
+Location: `app/api/ocr-structured-v4/route.ts:231`
+
+```typescript
+response_format: { type: "json_object" }
+```
+
+**Effect**: Forces models to emit valid JSON instead of wrapping in markdown code fences or adding prose.
+
+**Fallback**: If model doesn't support this, the coercion logic (`app/api/ocr-structured-v4/route.ts:309-351`) strips markdown anyway.
+
+## File Attachments
+
+### Images
+
+Location: `app/api/ocr-structured-v4/route.ts:249`
+
+```typescript
+content: [
+  { type: "text", text: "Return ONLY JSON matching the provided schema." },
+  { type: "image_url", image_url: { url: dataUrl } },
+]
+```
+
+**Data URL format**:
+```
+data:image/png;base64,iVBORw0KGgoAAAANS...
+```
+
+Helper: `app/api/ocr-structured-v4/route.ts:25-29`
+```typescript
+function toDataUrl(imageBase64: string, mimeType?: string) {
+  if (imageBase64.startsWith("data:")) return imageBase64;
+  const type = mimeType || "image/png";
+  return `data:${type};base64,${imageBase64}`;
+}
+```
+
+### PDFs
+
+Location: `app/api/ocr-structured-v4/route.ts:240-247`
+
+```typescript
+content: [
+  { type: "text", text: "Return ONLY JSON matching the provided schema." },
+  {
+    type: "file",
+    file: {
+      filename: body.filename || "invoice.pdf",
+      file_data: pdfData,  // Data URL or public URL
+    },
+  },
+]
+```
+
+**Supported formats**:
+- Data URL: `data:application/pdf;base64,...`
+- Public URL: `https://example.com/invoice.pdf`
+
+## PDF Plugins
+
+Location: `app/api/ocr-structured-v4/route.ts:268-277`
+
+### Configuration
+
+```typescript
+if (isPdf) {
+  const engine = process.env.OPENROUTER_PDF_ENGINE || "pdf-text";
+  const plugins: unknown = body.plugins || [
+    {
+      id: "file-parser",
+      pdf: { engine },
+    },
+  ];
+  (payload as Record<string, unknown>).plugins = plugins as unknown;
+}
+```
+
+### Engine Types
+
+| Engine | Method | Best For | Cost |
+|--------|--------|----------|------|
+| `pdf-text` | Text extraction | Digital PDFs with selectable text | $0.001/page |
+| `mistral-ocr` | Mistral Pixtral OCR | Scanned PDFs, images embedded in PDF | $0.01/page |
+| `native` | Model's built-in | Models with native PDF support (GPT-4o, Claude 3.5) | Varies |
+
+**Default**: `pdf-text` (fastest, cheapest for most invoices)
+
+**When to use `mistral-ocr`**:
+- Scanned/photographed documents
+- Poor-quality text extraction with `pdf-text`
+- Handwritten annotations
+
+### Custom Plugin Override
+
+Location: `app/api/ocr-structured-v4/route.ts:20-21`
+
+```typescript
+type OcrRequest = {
+  // ...
+  plugins?: unknown;  // Pass custom plugin config
+};
+```
+
+**Example**:
+```typescript
+fetch("/api/ocr-structured-v4", {
+  method: "POST",
+  body: JSON.stringify({
+    pdfBase64: "data:application/pdf;base64,...",
+    plugins: [
+      {
+        id: "file-parser",
+        pdf: {
+          engine: "mistral-ocr",
+          extract_images: true,
+        },
+      },
+    ],
+  }),
+});
+```
+
+## Annotations (Caching)
+
+Location: `app/api/ocr-structured-v4/route.ts:256-265`
+
+### Purpose
+
+When re-processing the same PDF with different prompts, OpenRouter can skip re-parsing if you pass the `annotations` from the previous response.
+
+### Usage
+
+```typescript
+if (body.annotations) {
+  const msgs = payload.messages as Array<Record<string, unknown>>;
+  msgs.push({
+    role: "assistant",
+    content: "Previous file parse metadata",
+    annotations: body.annotations as unknown,
+  });
+}
+```
+
+### Example Flow
+
+**First request** (no annotations):
+```typescript
+POST /api/ocr-structured-v4
+{ "pdfBase64": "...", "model": "gemini-2.5-flash" }
+
+// OpenRouter parses PDF (~2s) + runs model (~3s) = 5s total
+```
+
+**Response includes annotations**:
+```json
+{
+  "doc_level": { ... },
+  "items": [...],
+  "_annotations": { "file_id": "...", "parsed_at": "..." }
+}
+```
+
+**Second request** (with annotations):
+```typescript
+POST /api/ocr-structured-v4
+{
+  "pdfBase64": "...",
+  "model": "gpt-4o-mini",
+  "annotations": { "file_id": "...", "parsed_at": "..." }
+}
+
+// OpenRouter skips parsing, only runs model (~2s) = 2s total
+```
+
+**Savings**: ~$0.001/page on subsequent requests.
+
+## Response Handling
+
+### Success Response
+
+Location: `app/api/ocr-structured-v4/route.ts:299-306`
+
+```typescript
+const json = await response.json();
+const content: unknown = json?.choices?.[0]?.message?.content;
+if (!content) {
+  return NextResponse.json(
+    { error: "No content returned from model" },
+    { status: 500 }
+  );
+}
+```
+
+**Structure**:
+```json
+{
+  "id": "gen-...",
+  "model": "google/gemini-2.5-flash",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "{\"doc_level\":{...}}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1234,
+    "completion_tokens": 5678,
+    "total_tokens": 6912
+  }
+}
+```
+
+### Error Response
+
+Location: `app/api/ocr-structured-v4/route.ts:291-296`
+
+```typescript
+if (!response.ok) {
+  const err = await response.text();
+  return NextResponse.json(
+    { error: `OpenRouter error: ${response.status} ${err}` },
+    { status: 500 }
+  );
+}
+```
+
+**Common errors**:
+
+| Status | Cause | Solution |
+|--------|-------|----------|
+| `401` | Invalid API key | Check `OPENROUTER_API_KEY` in `.env.local` |
+| `402` | Insufficient credits | Add credits at openrouter.ai |
+| `429` | Rate limit exceeded | Wait or upgrade plan |
+| `502` | Model unavailable | Retry or switch model |
+
+### JSON Coercion
+
+Location: `app/api/ocr-structured-v4/route.ts:309-351`
+
+Even with `response_format: {type: "json_object"}`, some models may return:
+- Markdown code fences: ` ```json\n{...}\n``` `
+- Union types: `"price_mode": "WITH_TAX" | "WITHOUT_TAX"`
+- Invalid values: `NaN`, `Infinity`
+
+**Coercion pipeline**:
+
+```typescript
+const coerceToJson = (raw: unknown): unknown => {
+  // 1. Handle content arrays (some models return [{type:"text", text:"..."}])
+  if (Array.isArray(raw)) {
+    const joined = raw.map((chunk) => chunk.text || "").join("\n");
+    return coerceToJson(joined);
+  }
+  
+  let s = raw.trim();
+  
+  // 2. Strip Markdown code fences
+  if (s.startsWith("```")) {
+    s = s.replace(/^```[a-zA-Z]*\n/, "").replace(/```\s*$/, "").trim();
+  }
+  
+  // 3. Extract first JSON object
+  const firstBrace = s.indexOf("{");
+  const lastBrace = s.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    s = s.slice(firstBrace, lastBrace + 1);
+  }
+  
+  // 4. Clean up union types: "A" | "B" → "A"
+  s = s.replace(/"([^"]+)"\s*:\s*"([^"]+)"\s*\|\s*"([^"]+)"/g, '"$1": "$2"');
+  
+  // 5. Remove trailing commas
+  s = s.replace(/,\s*([}\]])/g, "$1");
+  
+  // 6. Replace NaN/Infinity with null
+  s = s.replace(/\bNaN\b|\bInfinity\b|\b-?Infinity\b/g, "null");
+  
+  return JSON.parse(s);
+};
+```
+
+**Example transformations**:
+
+Input:
+```json
+```json
+{
+  "price_mode": "WITH_TAX" | "WITHOUT_TAX",
+  "rate": NaN,
+  "items": [1, 2,],
+}
+```
+```
+
+Output:
+```json
+{
+  "price_mode": "WITH_TAX",
+  "rate": null,
+  "items": [1, 2]
+}
+```
+
+## Cost Optimization
+
+### Token Usage
+
+**System prompt**: ~2,600 characters = ~650 tokens
+**Schema**: ~4,000 characters = ~1,000 tokens
+**Invoice image**: ~1,000-2,000 tokens (depends on resolution)
+**Response**: ~2,000-5,000 tokens (depends on items)
+
+**Total per invoice**: ~5,000-9,000 tokens
+
+**Estimated costs** (gemini-2.5-flash @ $0.07/1M input, $0.30/1M output):
+- Input: 6,000 tokens × $0.07 / 1M = **$0.00042**
+- Output: 3,000 tokens × $0.30 / 1M = **$0.00090**
+- **Total per invoice**: ~**$0.0013** (0.13 cents)
+
+### Batching
+
+For processing multiple invoices, send requests in parallel:
+
+```typescript
+const results = await Promise.all(
+  invoices.map((invoice) =>
+    fetch("/api/ocr-structured-v4", {
+      method: "POST",
+      body: JSON.stringify({ pdfBase64: invoice.data }),
+    }).then((r) => r.json())
+  )
+);
+```
+
+**Rate limits** (free tier):
+- 200 requests/minute
+- 1M tokens/day
+
+Upgrade to paid for higher limits.
+
+### Model Selection Strategy
+
+**Development/Testing**:
+- Use `google/gemini-2.5-flash` (fast, cheap)
+
+**Production (high accuracy)**:
+- Use `openai/gpt-4o-mini` for critical invoices
+- Fall back to Gemini for simple layouts
+
+**Complex cases**:
+- Use `anthropic/claude-3.5-sonnet` for:
+  - Multi-page invoices with inconsistent layouts
+  - Handwritten annotations
+  - Tables spanning pages
+
+## Monitoring
+
+### OpenRouter Dashboard
+
+Location: [openrouter.ai/activity](https://openrouter.ai/activity)
+
+**Metrics**:
+- Requests per model
+- Token usage
+- Error rates
+- Cost breakdown
+
+### Application-Level Logging
+
+Add to API routes:
+
+```typescript
+console.log({
+  model: payload.model,
+  isPdf,
+  tokens: json.usage?.total_tokens,
+  duration_ms: Date.now() - start,
+  error_absolute: out.reconciliation?.error_absolute,
+});
+```
+
+Track:
+- Which models perform best
+- Average processing time
+- Reconciliation success rate
+
+## Security
+
+### API Key Protection
+
+**Never expose in frontend**:
+```typescript
+// ❌ WRONG (client-side)
+fetch("https://openrouter.ai/api/v1/chat/completions", {
+  headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}` },
+});
+
+// ✅ CORRECT (server-side API route)
+fetch("/api/ocr-structured-v4", { method: "POST", body: ... });
+```
+
+### Rate Limiting
+
+Add middleware to API routes:
+
+```typescript
+import { rateLimit } from "@/lib/rate-limit";
+
+export async function POST(req: NextRequest) {
+  const identifier = req.headers.get("x-forwarded-for") || "anonymous";
+  const { success } = await rateLimit(identifier, { limit: 10, window: "1m" });
+  if (!success) {
+    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+  }
+  // ...
+}
+```
+
+### Input Validation
+
+Location: `app/api/ocr-structured-v4/route.ts:199-205`
+
+```typescript
+if (!body?.imageBase64 && !body?.pdfUrl && !body?.pdfBase64) {
+  return NextResponse.json(
+    { error: "Provide 'imageBase64' or 'pdfUrl' or 'pdfBase64'" },
+    { status: 400 }
+  );
+}
+```
+
+Always validate:
+- File size (under 10MB)
+- MIME type (image/* or application/pdf)
+- Model ID (whitelist allowed models)
+
+## Testing
+
+### Mock Responses
+
+For unit tests, mock OpenRouter:
+
+```typescript
+import { vi } from "vitest";
+
+vi.mock("node-fetch", () => ({
+  default: vi.fn(() =>
+    Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        choices: [{ message: { content: JSON.stringify(mockInvoice) } }],
+      }),
+    })
+  ),
+}));
+```
+
+### Integration Tests
+
+Use test API key:
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-test-... npm test
+```
+
+Sample test invoice PDFs in `public/test-invoices/`.
+
+## Troubleshooting
+
+### Issue: Model returns invalid JSON
+
+**Symptoms**: `Model did not return valid JSON` error
+
+**Causes**:
+1. Model doesn't support `response_format: {type: "json_object"}`
+2. System prompt not clear enough
+3. Invoice too complex for model
+
+**Solutions**:
+1. Check model capabilities: [OpenRouter Models](https://openrouter.ai/models)
+2. Add `"Output ONLY the JSON object, no commentary"` to user message
+3. Switch to a more capable model (e.g., GPT-4o)
+
+### Issue: PDF parsing fails
+
+**Symptoms**: Empty or garbled text extraction
+
+**Causes**:
+1. Scanned PDF (no text layer)
+2. Complex layout (tables, multi-column)
+3. Non-English characters
+
+**Solutions**:
+1. Switch to `OPENROUTER_PDF_ENGINE=mistral-ocr`
+2. Try model with native PDF support: `openai/gpt-4o`
+3. Pre-process PDF with OCR tool before upload
+
+### Issue: High costs
+
+**Symptoms**: Unexpected charges in dashboard
+
+**Causes**:
+1. Using expensive models for simple invoices
+2. Re-parsing same PDF without annotations
+3. Large images not resized
+
+**Solutions**:
+1. Default to `gemini-2.5-flash`, upgrade only when needed
+2. Implement annotation caching (see above)
+3. Resize images to max 1200px width before upload
+
+## Next Steps
+
+- [OCR Processing Flow](/development/architecture/ocr-flow) - Full pipeline
+- [Reconciliation Logic](/development/architecture/reconciliation-logic) - Post-processing
+- [Environment Setup](/development/getting-started#environment-variables) - Configuration guide

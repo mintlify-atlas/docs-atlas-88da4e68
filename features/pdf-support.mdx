@@ -1,0 +1,651 @@
+---
+title: 'PDF Support'
+description: 'Process multi-page PDFs with OpenRouter file-parser plugin and optimize for performance'
+icon: 'file-pdf'
+---
+
+## Overview
+
+Invoice OCR supports PDF processing via OpenRouter's `file-parser` plugin. The plugin extracts text and structure from PDFs before vision model analysis, enabling accurate extraction from multi-page invoices.
+
+<Note>
+  PDF support is available in all three OCR modes: `/api/ocr`, `/api/ocr-structured`, and `/api/ocr-structured-v4`.
+</Note>
+
+---
+
+## Quick Start
+
+<Steps>
+  <Step title="Upload PDF">
+    Send PDF as base64 or public URL:
+    
+    ```typescript
+    const pdfBase64 = await fileToBase64(pdfFile);
+    
+    const response = await fetch('/api/ocr-structured-v4', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pdfBase64,
+        filename: 'invoice.pdf'
+      })
+    });
+    ```
+  </Step>
+  
+  <Step title="Choose Engine">
+    Configure PDF parsing engine (optional):
+    
+    <Tabs>
+      <Tab title="Environment Variable (Global)">
+        Set in `.env.local`:
+        ```bash
+        OPENROUTER_PDF_ENGINE=pdf-text
+        ```
+      </Tab>
+      <Tab title="Request Body (Per-Request)">
+        Override per request:
+        ```json
+        {
+          "pdfBase64": "...",
+          "plugins": [
+            {
+              "id": "file-parser",
+              "pdf": { "engine": "mistral-ocr" }
+            }
+          ]
+        }
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+  
+  <Step title="Process Response">
+    Handle multi-page metadata:
+    
+    ```typescript
+    const doc: V4Doc = await response.json();
+    
+    console.log(`Processed ${doc.meta.pages_processed} pages`);
+    console.log(`Total items: ${doc.items.length}`);
+    console.log(`HSN table rows: ${doc.printed.hsn_tax_table.length}`);
+    ```
+  </Step>
+</Steps>
+
+---
+
+## File-Parser Plugin
+
+### What It Does
+
+The `file-parser` plugin pre-processes PDFs before they reach the vision model:
+
+1. **Text Extraction**: Pulls embedded text from PDF structure
+2. **Layout Analysis**: Detects tables, headers, line items
+3. **Page Segmentation**: Splits multi-page documents into logical sections
+4. **Metadata Enrichment**: Adds bounding boxes, confidence scores, page numbers
+
+<Info>
+  This pre-processing significantly improves extraction quality for complex invoices with tables, multiple pages, and dense layouts.
+</Info>
+
+### Configuration
+
+```typescript
+// Default configuration (applied automatically)
+const defaultPlugin = {
+  id: "file-parser",
+  pdf: { engine: "pdf-text" }
+};
+
+// Custom configuration
+const customPlugin = {
+  id: "file-parser",
+  pdf: {
+    engine: "mistral-ocr", // or "native"
+    // Additional options (OpenRouter-specific)
+  }
+};
+```
+
+---
+
+## PDF Engines
+
+<CardGroup cols={3}>
+  <Card title="pdf-text" icon="file-lines">
+    **Default**
+    
+    Fast text extraction from PDF structure
+  </Card>
+  <Card title="mistral-ocr" icon="eye">
+    **High Accuracy**
+    
+    OCR-based extraction for scanned PDFs
+  </Card>
+  <Card title="native" icon="code">
+    **Model-Specific**
+    
+    Uses vision model's native PDF support
+  </Card>
+</CardGroup>
+
+### Engine Comparison
+
+<table>
+  <thead>
+    <tr>
+      <th>Engine</th>
+      <th>Best For</th>
+      <th>Speed</th>
+      <th>Quality</th>
+      <th>Cost</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>**pdf-text**</td>
+      <td>Digital PDFs with embedded text</td>
+      <td>⚡ Fast</td>
+      <td>⭐⭐⭐⭐ (digital)<br/>⭐⭐ (scanned)</td>
+      <td>💰 Low</td>
+    </tr>
+    <tr>
+      <td>**mistral-ocr**</td>
+      <td>Scanned PDFs, images of documents</td>
+      <td>🐌 Slow</td>
+      <td>⭐⭐⭐⭐⭐</td>
+      <td>💰💰💰 High</td>
+    </tr>
+    <tr>
+      <td>**native**</td>
+      <td>Models with built-in PDF support</td>
+      <td>⚡⚡ Very Fast</td>
+      <td>⭐⭐⭐⭐ (varies)</td>
+      <td>💰💰 Medium</td>
+    </tr>
+  </tbody>
+</table>
+
+### When to Use Each
+
+<Tabs>
+  <Tab title="pdf-text (Default)">
+    **Use Cases**:
+    - Invoices generated from billing software (QuickBooks, SAP, etc.)
+    - PDFs exported from Word/Excel
+    - Digital documents with selectable text
+    
+    **Advantages**:
+    - Fast processing (< 2 seconds per page)
+    - Low cost
+    - Preserves text structure and formatting
+    
+    **Limitations**:
+    - Poor quality on scanned/photographed documents
+    - May miss handwritten annotations
+    - Requires embedded text in PDF
+    
+    **Example**:
+    ```bash
+    # Set in .env.local
+    OPENROUTER_PDF_ENGINE=pdf-text
+    ```
+  </Tab>
+  
+  <Tab title="mistral-ocr">
+    **Use Cases**:
+    - Scanned paper invoices
+    - Photos/screenshots of invoices
+    - Low-quality PDFs with poor text embedding
+    - Handwritten or mixed content
+    
+    **Advantages**:
+    - Highest accuracy on scanned documents
+    - Handles rotated/skewed pages
+    - Recognizes handwritten notes
+    
+    **Limitations**:
+    - Slow (5-10 seconds per page)
+    - Higher cost (3-5× vs. pdf-text)
+    - May introduce OCR errors
+    
+    **Example**:
+    ```json
+    {
+      "pdfBase64": "...",
+      "plugins": [
+        {
+          "id": "file-parser",
+          "pdf": { "engine": "mistral-ocr" }
+        }
+      ]
+    }
+    ```
+  </Tab>
+  
+  <Tab title="native">
+    **Use Cases**:
+    - Models that natively support PDF input (e.g., Claude, some Gemini variants)
+    - When you want to bypass file-parser for debugging
+    - Cost optimization (skips plugin fees)
+    
+    **Advantages**:
+    - Very fast (model-dependent)
+    - No plugin overhead
+    - May leverage model-specific optimizations
+    
+    **Limitations**:
+    - Not all models support `native` mode
+    - Quality varies by model
+    - Less control over pre-processing
+    
+    **Example**:
+    ```typescript
+    const response = await fetch('/api/ocr-structured-v4', {
+      method: 'POST',
+      body: JSON.stringify({
+        pdfUrl: 'https://example.com/invoice.pdf',
+        model: 'anthropic/claude-3.5-sonnet',
+        plugins: [{ id: 'file-parser', pdf: { engine: 'native' } }]
+      })
+    });
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Input Formats
+
+### 1. Base64 (Recommended for Browser Uploads)
+
+```typescript
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Result is already a data URL: "data:application/pdf;base64,..."
+      resolve(result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+const pdfBase64 = await fileToBase64(pdfFile);
+
+await fetch('/api/ocr-structured-v4', {
+  method: 'POST',
+  body: JSON.stringify({
+    pdfBase64, // "data:application/pdf;base64,..."
+    filename: pdfFile.name
+  })
+});
+```
+
+<Note>
+  The API accepts both:
+  - Data URLs: `"data:application/pdf;base64,JVBERi0xLjQK..."`
+  - Raw base64: `"JVBERi0xLjQK..."`
+  
+  Both are automatically normalized to data URLs internally.
+</Note>
+
+### 2. Public URL (Recommended for Server-Side)
+
+```typescript
+// For publicly accessible PDFs
+await fetch('/api/ocr-structured-v4', {
+  method: 'POST',
+  body: JSON.stringify({
+    pdfUrl: 'https://example.com/invoices/2024/january/invoice-001.pdf',
+    model: 'google/gemini-2.0-flash'
+  })
+});
+```
+
+<Warning>
+  The URL must be publicly accessible (no authentication required). OpenRouter servers fetch the PDF directly.
+  
+  For private PDFs, use base64 encoding instead.
+</Warning>
+
+---
+
+## Multi-Page Handling
+
+### How It Works
+
+The V4 system prompt explicitly instructs models to process **all pages**:
+
+```typescript
+const SYSTEM_PROMPT = `
+# Response Rules
+- If a PDF is provided, consider ALL pages.
+- Prefer HSN tables and tax summaries found on any page as anchors.
+...
+`;
+```
+
+### Extracting Across Pages
+
+<Steps>
+  <Step title="Page 1: Line Items">
+    ```json
+    {
+      "items": [
+        { "name": "Laptop", "qty": 2, "rate_ex_tax": 45000 },
+        { "name": "Mouse", "qty": 10, "rate_ex_tax": 500 }
+      ]
+    }
+    ```
+  </Step>
+  
+  <Step title="Page 2: HSN Tax Table">
+    ```json
+    {
+      "printed": {
+        "hsn_tax_table": [
+          {
+            "hsn": "8471",
+            "taxable_value": 95000,
+            "cgst_rate": 9,
+            "sgst_rate": 9,
+            "cgst_amount": 8550,
+            "sgst_amount": 8550
+          }
+        ]
+      }
+    }
+    ```
+  </Step>
+  
+  <Step title="Reconciliation">
+    The engine uses the HSN table from Page 2 to anchor items from Page 1:
+    
+    ```typescript
+    // Scale items to match HSN table taxable value
+    const printedTaxable = 95000;
+    const computedTaxable = 2 * 45000 + 10 * 500; // = 95000 ✓
+    
+    // No scaling needed, perfect match
+    ```
+  </Step>
+</Steps>
+
+### Validating Page Count
+
+```typescript
+const doc: V4Doc = await response.json();
+
+if (doc.meta.pages_processed < expectedPageCount) {
+  console.warn('Not all pages were processed');
+  console.log(`Expected: ${expectedPageCount}, Got: ${doc.meta.pages_processed}`);
+  
+  // Try with mistral-ocr engine
+  const retryResponse = await fetch('/api/ocr-structured-v4', {
+    method: 'POST',
+    body: JSON.stringify({
+      pdfBase64,
+      plugins: [{ id: 'file-parser', pdf: { engine: 'mistral-ocr' } }]
+    })
+  });
+}
+```
+
+---
+
+## Performance Optimization
+
+### 1. Use Annotations for Re-Processing
+
+OpenRouter returns `annotations` after the first parse. Pass them back to skip re-parsing:
+
+```typescript
+// First request: Full parse
+const firstResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    model: 'google/gemini-2.0-flash',
+    messages: [...],
+    plugins: [{ id: 'file-parser', pdf: { engine: 'pdf-text' } }]
+  })
+});
+
+const firstData = await firstResponse.json();
+const annotations = firstData.annotations; // Save this!
+
+// Second request: Use annotations to skip re-parse
+const secondResponse = await fetch('/api/ocr-structured-v4', {
+  method: 'POST',
+  body: JSON.stringify({
+    pdfBase64: samePdf,
+    annotations, // Reuse parse results
+    // Different prompt/schema can be used without re-parsing
+  })
+});
+```
+
+<Tip>
+  Annotations save **5-10 seconds** and **reduce costs by 50-80%** for large PDFs. Store them if you need to re-process the same PDF with different parameters.
+</Tip>
+
+### 2. Choose the Right Engine
+
+<table>
+  <thead>
+    <tr>
+      <th>Document Type</th>
+      <th>Recommended Engine</th>
+      <th>Avg. Time (5 pages)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Digital invoices (software-generated)</td>
+      <td>`pdf-text`</td>
+      <td>3-5 seconds</td>
+    </tr>
+    <tr>
+      <td>Scanned invoices (clear)</td>
+      <td>`mistral-ocr`</td>
+      <td>20-30 seconds</td>
+    </tr>
+    <tr>
+      <td>Scanned invoices (poor quality)</td>
+      <td>`mistral-ocr` + retry</td>
+      <td>30-45 seconds</td>
+    </tr>
+    <tr>
+      <td>Mixed (some digital, some scanned)</td>
+      <td>`pdf-text` → `mistral-ocr` fallback</td>
+      <td>5-30 seconds</td>
+    </tr>
+  </tbody>
+</table>
+
+### 3. Implement Smart Fallback
+
+```typescript
+async function extractInvoice(pdfBase64: string): Promise<V4Doc> {
+  // Try fast engine first
+  let response = await fetch('/api/ocr-structured-v4', {
+    method: 'POST',
+    body: JSON.stringify({
+      pdfBase64,
+      plugins: [{ id: 'file-parser', pdf: { engine: 'pdf-text' } }]
+    })
+  });
+  
+  let doc: V4Doc = await response.json();
+  
+  // Check extraction quality
+  if (doc.items.length === 0 || doc.reconciliation.error_absolute > 100) {
+    console.log('Poor quality with pdf-text, retrying with mistral-ocr...');
+    
+    response = await fetch('/api/ocr-structured-v4', {
+      method: 'POST',
+      body: JSON.stringify({
+        pdfBase64,
+        plugins: [{ id: 'file-parser', pdf: { engine: 'mistral-ocr' } }]
+      })
+    });
+    
+    doc = await response.json();
+  }
+  
+  return doc;
+}
+```
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Missing Items from Later Pages">
+    **Symptoms**:
+    - `items.length` is less than expected
+    - `meta.pages_processed` < actual page count
+    - Reconciliation error is very large
+    
+    **Solutions**:
+    1. Check if PDF has embedded text:
+       ```bash
+       pdftotext invoice.pdf - | head
+       ```
+       If output is garbled/empty → use `mistral-ocr`
+    
+    2. Verify page count in response:
+       ```typescript
+       if (doc.meta.pages_processed < pdfPageCount) {
+         // Try mistral-ocr or native
+       }
+       ```
+    
+    3. Try native mode (model-dependent):
+       ```json
+       {
+         "plugins": [{ "id": "file-parser", "pdf": { "engine": "native" } }]
+       }
+       ```
+  </Accordion>
+  
+  <Accordion title="HSN Table Not Detected">
+    **Symptoms**:
+    - `printed.hsn_tax_table` is empty array
+    - Reconciliation uses fallback logic (worse accuracy)
+    
+    **Solutions**:
+    1. Ensure HSN table is on a page that was processed:
+       ```typescript
+       console.log(`Pages processed: ${doc.meta.pages_processed}`);
+       ```
+    
+    2. Try mistral-ocr for better table detection:
+       ```json
+       { "plugins": [{ "id": "file-parser", "pdf": { "engine": "mistral-ocr" } }] }
+       ```
+    
+    3. Check if table is labeled ("HSN/SAC Summary", "Tax Details"):
+       - Models look for these keywords
+       - If missing, table might not be recognized
+  </Accordion>
+  
+  <Accordion title="Slow Processing (> 60 seconds)">
+    **Causes**:
+    - Large PDF (> 10 pages)
+    - Using mistral-ocr on digital PDF (overkill)
+    - Model timeout/overload
+    
+    **Solutions**:
+    1. Split PDF into smaller chunks:
+       ```typescript
+       // Process invoice page + HSN table page separately
+       const mainPages = await extractPages(pdf, [0, 1]);
+       const tablePage = await extractPages(pdf, [2]);
+       ```
+    
+    2. Switch to pdf-text for digital PDFs:
+       ```bash
+       OPENROUTER_PDF_ENGINE=pdf-text
+       ```
+    
+    3. Use annotations for subsequent requests:
+       ```typescript
+       const { annotations } = await firstRequest();
+       await secondRequest({ annotations }); // Much faster
+       ```
+  </Accordion>
+  
+  <Accordion title="Poor Quality on Scanned PDFs">
+    **Symptoms**:
+    - Gibberish text in items
+    - Numbers are incorrect
+    - Confidence scores < 0.7
+    
+    **Solutions**:
+    1. Force mistral-ocr:
+       ```json
+       { "plugins": [{ "id": "file-parser", "pdf": { "engine": "mistral-ocr" } }] }
+       ```
+    
+    2. Pre-process PDF:
+       - Deskew rotated pages
+       - Increase DPI (300+ recommended)
+       - Convert to grayscale
+       - Remove noise/artifacts
+    
+    3. Try different model:
+       ```json
+       {
+         "model": "anthropic/claude-3.5-sonnet",
+         "plugins": [{ "id": "file-parser", "pdf": { "engine": "mistral-ocr" } }]
+       }
+       ```
+       Some models handle OCR output better than others.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use pdf-text by Default" icon="bolt">
+    Start with `pdf-text` for speed and cost. Fallback to `mistral-ocr` only if extraction quality is poor.
+  </Card>
+  
+  <Card title="Cache Annotations" icon="database">
+    Store OpenRouter `annotations` in your database. Reuse them for re-processing the same PDF with different schemas.
+  </Card>
+  
+  <Card title="Validate Page Count" icon="check">
+    Always check `meta.pages_processed` matches expected page count. Missing pages = missing data.
+  </Card>
+  
+  <Card title="Monitor Reconciliation Errors" icon="chart-line">
+    Track `reconciliation.error_absolute` across PDFs. Sudden increase may indicate PDF quality issues.
+  </Card>
+</CardGroup>
+
+---
+
+## Related Topics
+
+<CardGroup cols={2}>
+  <Card title="OCR Modes" icon="layer-group" href="/features/ocr-modes">
+    Choose between Raw, Structured, and V4 modes
+  </Card>
+  <Card title="Reconciliation Engine" icon="calculator" href="/features/reconciliation-engine">
+    How multi-page HSN tables anchor reconciliation
+  </Card>
+</CardGroup>

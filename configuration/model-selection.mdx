@@ -1,0 +1,421 @@
+---
+title: Model Selection
+description: Choose the right vision model for your invoice OCR needs
+icon: brain
+---
+
+Invoice OCR supports multiple vision models through OpenRouter. This guide helps you choose the right model based on accuracy, speed, and cost requirements.
+
+## Default Model
+
+Invoice OCR defaults to `google/gemini-2.0-flash` when `OPENROUTER_MODEL` is not set.
+
+**Why Gemini 2.0 Flash?**
+- Fast processing (typically 1-3 seconds per invoice)
+- Excellent accuracy for structured documents
+- Cost-effective at ~$0.001-$0.003 per invoice
+- Native multimodal support (no image-to-text conversion)
+- Large context window (1M tokens)
+
+## Model Comparison
+
+### Recommended Models
+
+<CardGroup cols={2}>
+  <Card title="google/gemini-2.0-flash" icon="zap">
+    **Best for:** Production use, high volume
+    
+    - **Speed:** Fast (1-3s)
+    - **Accuracy:** High
+    - **Cost:** $0.001-$0.003/invoice
+    - **Context:** 1M tokens
+    
+    **Ideal for:**
+    - Processing hundreds of invoices
+    - Real-time API integrations
+    - Cost-sensitive applications
+  </Card>
+  
+  <Card title="openai/gpt-4o" icon="star">
+    **Best for:** Maximum accuracy
+    
+    - **Speed:** Medium (3-5s)
+    - **Accuracy:** Highest
+    - **Cost:** $0.01-$0.03/invoice
+    - **Context:** 128k tokens
+    
+    **Ideal for:**
+    - Complex invoices with handwriting
+    - Multi-page PDFs with tables
+    - Critical financial documents
+  </Card>
+  
+  <Card title="anthropic/claude-3.5-sonnet" icon="sparkles">
+    **Best for:** Complex reasoning
+    
+    - **Speed:** Medium (3-5s)
+    - **Accuracy:** Very High
+    - **Cost:** $0.015-$0.04/invoice
+    - **Context:** 200k tokens
+    
+    **Ideal for:**
+    - Invoices with complex tax calculations
+    - Multi-currency documents
+    - Detailed reconciliation needs
+  </Card>
+  
+  <Card title="openai/gpt-4o-mini" icon="bolt">
+    **Best for:** Budget-conscious development
+    
+    - **Speed:** Very Fast (under 2s)
+    - **Accuracy:** Good
+    - **Cost:** $0.0005-$0.001/invoice
+    - **Context:** 128k tokens
+    
+    **Ideal for:**
+    - Development and testing
+    - Simple invoices
+    - High-volume, low-stakes use cases
+  </Card>
+</CardGroup>
+
+### Performance Matrix
+
+| Model | Speed | Accuracy | Cost (avg) | Best For |
+|-------|-------|----------|------------|----------|
+| `google/gemini-2.0-flash` | ⚡⚡⚡ | ⭐⭐⭐⭐ | $0.002 | **Production default** |
+| `openai/gpt-4o` | ⚡⚡ | ⭐⭐⭐⭐⭐ | $0.020 | Maximum accuracy |
+| `openai/gpt-4o-mini` | ⚡⚡⚡⚡ | ⭐⭐⭐ | $0.001 | Budget/testing |
+| `anthropic/claude-3.5-sonnet` | ⚡⚡ | ⭐⭐⭐⭐⭐ | $0.025 | Complex reasoning |
+| `anthropic/claude-3-opus` | ⚡ | ⭐⭐⭐⭐⭐ | $0.040 | Highest accuracy |
+| `anthropic/claude-3-haiku` | ⚡⚡⚡⚡ | ⭐⭐⭐ | $0.001 | Fast & cheap |
+
+<Note>
+Costs are approximate and based on typical invoice processing (1-2 page documents with 500-2000 tokens of output). Actual costs vary based on document complexity, page count, and output verbosity.
+</Note>
+
+## Choosing a Model
+
+### By Use Case
+
+<AccordionGroup>
+  <Accordion title="Production API (High Volume)">
+    **Recommended:** `google/gemini-2.0-flash`
+    
+    **Why:**
+    - Processes 1000+ invoices/day cost-effectively
+    - Fast enough for real-time user experiences
+    - High accuracy for standard invoices
+    - Reliable and well-supported
+    
+    **Configuration:**
+    ```bash .env.local
+    OPENROUTER_MODEL=google/gemini-2.0-flash
+    ```
+  </Accordion>
+  
+  <Accordion title="Critical Financial Documents">
+    **Recommended:** `openai/gpt-4o` or `anthropic/claude-3.5-sonnet`
+    
+    **Why:**
+    - Highest accuracy for complex invoices
+    - Better handling of edge cases
+    - More robust number extraction
+    - Strong reasoning for tax calculations
+    
+    **Configuration:**
+    ```bash .env.local
+    OPENROUTER_MODEL=openai/gpt-4o
+    ```
+  </Accordion>
+  
+  <Accordion title="Development & Testing">
+    **Recommended:** `openai/gpt-4o-mini`
+    
+    **Why:**
+    - Very low cost during development
+    - Fast iteration cycles
+    - Good enough for testing workflows
+    - Upgrade to production model when deploying
+    
+    **Configuration:**
+    ```bash .env.local
+    OPENROUTER_MODEL=openai/gpt-4o-mini
+    ```
+  </Accordion>
+  
+  <Accordion title="Complex Multi-Page Invoices">
+    **Recommended:** `anthropic/claude-3.5-sonnet`
+    
+    **Why:**
+    - 200k token context window
+    - Excellent multi-page reasoning
+    - Strong table extraction
+    - Detailed reconciliation capabilities
+    
+    **Configuration:**
+    ```bash .env.local
+    OPENROUTER_MODEL=anthropic/claude-3.5-sonnet
+    ```
+  </Accordion>
+  
+  <Accordion title="Scanned/Low-Quality Images">
+    **Recommended:** `openai/gpt-4o`
+    
+    **Why:**
+    - Best OCR capabilities
+    - Handles blurry or rotated images
+    - Good with handwritten notes
+    - Robust to image quality issues
+    
+    **Configuration:**
+    ```bash .env.local
+    OPENROUTER_MODEL=openai/gpt-4o
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### By Document Type
+
+| Document Type | Recommended Model | Reason |
+|---------------|-------------------|--------|
+| Standard tax invoices | `gemini-2.0-flash` | Fast, accurate, cost-effective |
+| GST invoices (India) | `gemini-2.0-flash` | Native handling of complex schemas |
+| Multi-page invoices | `claude-3.5-sonnet` | Large context, strong reasoning |
+| Handwritten invoices | `gpt-4o` | Best OCR capabilities |
+| Scanned PDFs | `gpt-4o` | Robust to image quality |
+| Simple receipts | `gpt-4o-mini` | Overkill to use expensive models |
+| International invoices | `claude-3.5-sonnet` | Multi-language, multi-currency |
+
+## Cost Optimization
+
+### Strategies
+
+<Steps>
+  <Step title="Use Cheaper Models for Simple Invoices">
+    Route simple invoices to `gpt-4o-mini` and complex ones to `gpt-4o`:
+    
+    ```typescript
+    const model = invoice.pageCount > 2 || invoice.hasHandwriting
+      ? 'openai/gpt-4o'
+      : 'openai/gpt-4o-mini';
+    ```
+  </Step>
+  
+  <Step title="Cache Annotations for Multi-Page PDFs">
+    Reuse OpenRouter's file parsing to avoid re-parsing costs:
+    
+    ```typescript
+    // First request
+    const response = await fetch('/api/ocr-structured-v4', {
+      method: 'POST',
+      body: JSON.stringify({ pdfBase64: '...' })
+    });
+    const result = await response.json();
+    
+    // Store annotations for reuse
+    const annotations = result._annotations;
+    
+    // Subsequent requests with same PDF
+    const response2 = await fetch('/api/ocr-structured-v4', {
+      method: 'POST',
+      body: JSON.stringify({
+        pdfBase64: '...',
+        annotations // Skips re-parsing
+      })
+    });
+    ```
+  </Step>
+  
+  <Step title="Use Gemini for Production">
+    `gemini-2.0-flash` offers the best cost/performance ratio:
+    
+    - 5-10x cheaper than GPT-4o
+    - Similar accuracy for structured documents
+    - Faster processing
+  </Step>
+  
+  <Step title="Monitor Usage">
+    Track costs per model in OpenRouter dashboard:
+    
+    1. Go to [openrouter.ai/activity](https://openrouter.ai/activity)
+    2. Filter by model
+    3. Identify expensive requests
+    4. Optimize or switch models
+  </Step>
+</Steps>
+
+### Cost Estimation
+
+**Example: Processing 1000 invoices/month**
+
+| Model | Cost per Invoice | Monthly Cost |
+|-------|------------------|-------------|
+| `gpt-4o-mini` | $0.001 | **$1** |
+| `gemini-2.0-flash` | $0.002 | **$2** |
+| `gemini-pro` | $0.005 | **$5** |
+| `gpt-4o` | $0.020 | **$20** |
+| `claude-3.5-sonnet` | $0.025 | **$25** |
+| `claude-3-opus` | $0.040 | **$40** |
+
+<Note>
+**Hybrid approach:** Use `gemini-2.0-flash` for 90% of invoices and `gpt-4o` for the 10% that fail validation. This gives you high accuracy at ~$4/month for 1000 invoices.
+</Note>
+
+## Per-Request Model Override
+
+You can override the default model on a per-request basis:
+
+```typescript
+const response = await fetch('/api/ocr-structured-v4', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    imageBase64: '...',
+    model: 'openai/gpt-4o' // Override
+  })
+});
+```
+
+This allows you to:
+- Use different models for different invoice types
+- Retry failed extractions with a more powerful model
+- A/B test models for accuracy
+
+## Model Availability
+
+Check available models in real-time:
+
+<Steps>
+  <Step title="Via OpenRouter Dashboard">
+    Browse all models at [openrouter.ai/models](https://openrouter.ai/models)
+    
+    Filter by:
+    - Vision support
+    - Context length
+    - Pricing
+    - Provider
+  </Step>
+  
+  <Step title="Via API Endpoint">
+    Invoice OCR includes a models endpoint:
+    
+    ```bash
+    curl http://localhost:3000/api/models
+    ```
+    
+    Returns:
+    ```json
+    {
+      "models": [
+        {
+          "id": "google/gemini-2.0-flash",
+          "name": "Gemini 2.0 Flash",
+          "contextLength": 1000000,
+          "pricing": {
+            "promptPer1k": 0.025,
+            "completionPer1k": 0.1,
+            "imagePer1k": 0.025
+          },
+          "isVision": true
+        }
+      ],
+      "cached": true,
+      "count": 47
+    }
+    ```
+  </Step>
+  
+  <Step title="Via UI">
+    The Invoice OCR web interface displays available models in the model selector dropdown.
+  </Step>
+</Steps>
+
+## PDF-Specific Considerations
+
+### PDF Engine Selection
+
+The PDF parsing engine can impact model performance:
+
+```bash .env.local
+OPENROUTER_PDF_ENGINE=pdf-text  # Default: fast text extraction
+# OPENROUTER_PDF_ENGINE=mistral-ocr  # For scanned PDFs
+# OPENROUTER_PDF_ENGINE=native  # Provider's native handling
+```
+
+**Recommendations:**
+- `pdf-text`: Use with any model for digital PDFs
+- `mistral-ocr`: Use with `gemini-2.0-flash` or `gpt-4o` for scanned PDFs
+- `native`: Let the model provider handle PDF parsing
+
+### Multi-Page PDFs
+
+Models with larger context windows handle multi-page invoices better:
+
+| Pages | Recommended Model | Context Needed |
+|-------|-------------------|----------------|
+| 1-2 | Any model | ~4k tokens |
+| 3-5 | `gemini-2.0-flash` | ~20k tokens |
+| 6-10 | `claude-3.5-sonnet` | ~50k tokens |
+| 10+ | `gemini-2.0-flash` | ~100k+ tokens |
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Model not found error">
+    **Error:** "Model not found" or "Invalid model"
+    
+    **Solutions:**
+    - Check model ID spelling (case-sensitive)
+    - Verify model is available: [openrouter.ai/models](https://openrouter.ai/models)
+    - Try the `/api/models` endpoint to see available vision models
+    - Use a known-good model like `google/gemini-2.0-flash`
+  </Accordion>
+  
+  <Accordion title="Poor extraction quality">
+    **Problem:** Model not extracting data correctly
+    
+    **Solutions:**
+    1. Try a more powerful model (`gpt-4o` or `claude-3.5-sonnet`)
+    2. Check image quality (resolution, rotation, clarity)
+    3. Use `mistral-ocr` PDF engine for scanned documents
+    4. Review the raw OCR output via `/api/ocr` to diagnose issues
+  </Accordion>
+  
+  <Accordion title="Slow processing times">
+    **Problem:** API requests taking too long
+    
+    **Solutions:**
+    - Switch to faster models (`gpt-4o-mini`, `gemini-2.0-flash`)
+    - Reduce PDF page count (extract relevant pages only)
+    - Use `pdf-text` engine instead of `mistral-ocr`
+    - Check OpenRouter status: [status.openrouter.ai](https://status.openrouter.ai)
+  </Accordion>
+  
+  <Accordion title="High costs">
+    **Problem:** API costs higher than expected
+    
+    **Solutions:**
+    - Switch default model to `gemini-2.0-flash` or `gpt-4o-mini`
+    - Implement caching for repeated PDFs
+    - Monitor usage per model in OpenRouter dashboard
+    - Set credit limits on API keys
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Environment Variables" icon="terminal" href="/configuration/environment-variables">
+    Configure OPENROUTER_MODEL in .env.local
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview/ocr-structured-v4">
+    Learn how to override models per-request
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/getting-started/quick-start">
+    Start processing invoices
+  </Card>
+  <Card title="OpenRouter Dashboard" icon="chart-line" href="https://openrouter.ai/activity">
+    Monitor usage and costs
+  </Card>
+</CardGroup>
