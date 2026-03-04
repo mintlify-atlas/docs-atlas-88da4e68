@@ -1,0 +1,130 @@
+{
+  "projectType": "saas",
+  "projectName": "Invoice OCR",
+  "projectDescription": "AI-powered invoice OCR with India GST support and intelligent reconciliation",
+  "theme": "palm",
+  "primaryColor": "#9ba9b9",
+  "lightColor": "#cfd9e1",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/ocr-modes",
+              "features/reconciliation-engine",
+              "features/pdf-support",
+              "features/review-tool"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/uploading-invoices",
+              "guides/processing-pdfs",
+              "guides/understanding-reconciliation",
+              "guides/debugging-with-review-tool"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/openrouter-setup",
+              "configuration/model-selection"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/overview",
+              "api/ocr",
+              "api/ocr-structured",
+              "api/ocr-structured-v4"
+            ]
+          },
+          {
+            "group": "Schemas",
+            "pages": [
+              "api/schemas/v4-schema",
+              "api/schemas/mybillbook-schema",
+              "api/schemas/request-formats"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Development",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "development/project-structure",
+              "development/tech-stack",
+              "development/local-development"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "development/architecture/ocr-flow",
+              "development/architecture/reconciliation-logic",
+              "development/architecture/openrouter-integration"
+            ]
+          },
+          {
+            "group": "Testing",
+            "pages": [
+              "development/testing/overview",
+              "development/testing/running-tests",
+              "development/testing/writing-tests"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "development/contributing/guidelines",
+              "development/contributing/code-style",
+              "development/contributing/commit-conventions"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multiple OCR modes (raw text, structured MyBillBook, normalized India GST)",
+    "Intelligent reconciliation engine that validates totals and tax calculations",
+    "PDF and image support via OpenRouter vision models",
+    "LangFuse review tool for debugging OCR responses",
+    "Strict JSON output enforcement",
+    "India GST-specific features (CGST/SGST/IGST, HSN codes)",
+    "Automatic detection of price modes (with/without tax)",
+    "Line-item discount and tax breakdown"
+  ],
+  "publicApiSurface": [
+    "POST /api/ocr - Raw text OCR extraction",
+    "POST /api/ocr-structured - MyBillBook schema extraction",
+    "POST /api/ocr-structured-v4 - Normalized India GST with reconciliation",
+    "GET /api/models - Available OpenRouter models",
+    "reconcileV4() - Reconciliation engine function",
+    "V4Doc type - Document schema interface",
+    "V4Item type - Line item schema interface"
+  ]
+}
