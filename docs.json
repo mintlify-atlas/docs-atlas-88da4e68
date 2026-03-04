@@ -42,7 +42,8 @@
               "features/ocr-modes",
               "features/reconciliation-engine",
               "features/pdf-support",
-              "features/review-tool"
+              "features/review-tool",
+              "features/model-comparison"
             ]
           },
           {
@@ -73,7 +74,8 @@
               "api/overview",
               "api/ocr",
               "api/ocr-structured",
-              "api/ocr-structured-v4"
+              "api/ocr-structured-v4",
+              "api/models"
             ]
           },
           {

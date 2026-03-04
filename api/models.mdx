@@ -1,0 +1,283 @@
+---
+title: "GET /api/models"
+description: "List available vision-capable models from OpenRouter"
+---
+
+Returns a list of vision-capable models available through OpenRouter. Results are cached for 1 hour to minimize API calls.
+
+## Endpoint
+
+```
+GET /api/models
+```
+
+## Use Cases
+
+- Discover available vision models for OCR
+- Compare model pricing and capabilities
+- Dynamically populate model selection dropdowns
+- Check context lengths and pricing before processing
+
+## Request
+
+No parameters required. Simple GET request:
+
+```bash cURL
+curl http://localhost:3000/api/models
+```
+
+```javascript JavaScript
+const response = await fetch('/api/models');
+const data = await response.json();
+console.log(`Found ${data.count} vision models`);
+```
+
+```python Python
+import requests
+
+response = requests.get('http://localhost:3000/api/models')
+data = response.json()
+print(f"Found {data['count']} vision models")
+```
+
+## Response
+
+<ResponseField name="models" type="VisionModel[]" required>
+  Array of vision-capable models
+  
+  <Expandable title="VisionModel properties">
+    <ResponseField name="id" type="string">
+      Model identifier (e.g., "openai/gpt-4o", "google/gemini-2.0-flash")
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Human-readable model name
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Model description from OpenRouter
+    </ResponseField>
+    
+    <ResponseField name="contextLength" type="number">
+      Maximum context window in tokens
+    </ResponseField>
+    
+    <ResponseField name="pricing" type="object">
+      Cost per 1k tokens in USD
+      
+      <Expandable title="pricing properties">
+        <ResponseField name="promptPer1k" type="number">
+          Cost per 1k input tokens
+        </ResponseField>
+        
+        <ResponseField name="completionPer1k" type="number">
+          Cost per 1k output tokens
+        </ResponseField>
+        
+        <ResponseField name="imagePer1k" type="number">
+          Cost per 1k image tokens (0 if text-only)
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="provider" type="string">
+      Model provider (openai, google, anthropic, etc.)
+    </ResponseField>
+    
+    <ResponseField name="isVision" type="boolean">
+      Whether model supports image/vision input (always true for this endpoint)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="cached" type="boolean" required>
+  Whether this response was served from cache
+</ResponseField>
+
+<ResponseField name="count" type="number">
+  Total number of models returned (only on fresh fetch)
+</ResponseField>
+
+<ResponseField name="cacheAge" type="number">
+  Age of cached data in seconds (only when cached=true)
+</ResponseField>
+
+## Example Response
+
+```json
+{
+  "models": [
+    {
+      "id": "google/gemini-2.0-flash",
+      "name": "Google: Gemini 2.0 Flash",
+      "description": "Fast multimodal model with vision capabilities",
+      "contextLength": 1000000,
+      "pricing": {
+        "promptPer1k": 0.075,
+        "completionPer1k": 0.30,
+        "imagePer1k": 0.01315789
+      },
+      "provider": "google",
+      "isVision": true
+    },
+    {
+      "id": "openai/gpt-4o",
+      "name": "OpenAI: GPT-4o",
+      "description": "High-intelligence flagship model for complex tasks",
+      "contextLength": 128000,
+      "pricing": {
+        "promptPer1k": 2.50,
+        "completionPer1k": 10.00,
+        "imagePer1k": 7.225
+      },
+      "provider": "openai",
+      "isVision": true
+    },
+    {
+      "id": "anthropic/claude-3.5-sonnet",
+      "name": "Anthropic: Claude 3.5 Sonnet",
+      "description": "Highest level of intelligence and capability",
+      "contextLength": 200000,
+      "pricing": {
+        "promptPer1k": 3.00,
+        "completionPer1k": 15.00,
+        "imagePer1k": 4.80
+      },
+      "provider": "anthropic",
+      "isVision": true
+    }
+  ],
+  "cached": false,
+  "count": 3
+}
+```
+
+## Caching Behavior
+
+The endpoint caches results for **1 hour** (3600 seconds) to reduce load on OpenRouter's API.
+
+**Fresh Response:**
+```json
+{
+  "models": [...],
+  "cached": false,
+  "count": 45
+}
+```
+
+**Cached Response:**
+```json
+{
+  "models": [...],
+  "cached": true,
+  "cacheAge": 1823
+}
+```
+
+<Note>
+Cache is server-side and shared across all requests. First request after server restart or cache expiry will fetch fresh data.
+</Note>
+
+## Vision Model Detection
+
+The endpoint filters models based on multiple criteria:
+
+1. **Architecture modality**: Checks for "image", "vision", or "multimodal" in model architecture
+2. **Image pricing**: Models with non-zero image pricing are considered vision-capable
+3. **Model name patterns**: Detects common vision model identifiers:
+   - GPT-4o, GPT-4-turbo
+   - Gemini (all versions)
+   - Claude 3+ (Opus, Sonnet, Haiku)
+   - LLaVA, Pixtral, Qwen-VL
+   - CogVLM, InternVL, Yi-Vision
+
+## Sorting
+
+Models are sorted by:
+1. Provider name (alphabetically)
+2. Model name (alphabetically within provider)
+
+Example order:
+- `anthropic/claude-3-haiku`
+- `anthropic/claude-3.5-sonnet`
+- `google/gemini-2.0-flash`
+- `openai/gpt-4o-mini`
+
+## Use with OCR Endpoints
+
+Select a model from this list to use with OCR endpoints:
+
+```javascript
+// 1. Fetch available models
+const modelsResponse = await fetch('/api/models');
+const { models } = await modelsResponse.json();
+
+// 2. Find a suitable model
+const gemini = models.find(m => m.id === 'google/gemini-2.0-flash');
+
+// 3. Use it for OCR
+const ocrResponse = await fetch('/api/ocr-structured-v4', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    imageBase64: '...',
+    model: gemini.id
+  })
+});
+```
+
+## Error Responses
+
+<Accordion title="OpenRouter API Error (500)">
+```json
+{
+  "error": "Failed to fetch models: 401 Unauthorized",
+  "models": []
+}
+```
+
+The server failed to fetch models from OpenRouter. Check server logs for details.
+</Accordion>
+
+<Accordion title="Network Error (500)">
+```json
+{
+  "error": "Network request failed",
+  "models": []
+}
+```
+
+Network connectivity issue. Returns cached models if available, otherwise empty array.
+</Accordion>
+
+## Implementation Details
+
+**Source:** `app/api/models/route.ts`
+
+**Cache Implementation:**
+- In-memory cache (resets on server restart)
+- 1-hour TTL (3600000ms)
+- Atomic cache updates
+
+**Filtering Logic:**
+- Fetches all models from OpenRouter
+- Filters to vision-capable only
+- Transforms to simplified schema
+- Sorts by provider then name
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Model Selection Guide" icon="brain" href="/configuration/model-selection">
+    Learn how to choose the right model
+  </Card>
+  <Card title="OCR Endpoints" icon="code" href="/api/overview">
+    Use models with OCR extraction
+  </Card>
+  <Card title="Request Formats" icon="envelope" href="/api/schemas/request-formats">
+    Override model per request
+  </Card>
+  <Card title="Compare Page" icon="chart-mixed" href="/features/model-comparison">
+    Test multiple models side-by-side
+  </Card>
+</CardGroup>

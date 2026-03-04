@@ -53,25 +53,25 @@ The API routes handle authentication with OpenRouter internally - clients do not
 
 ## Endpoints
 
-Three endpoints provide different levels of extraction:
+### OCR Extraction Endpoints
 
-### Raw Text Extraction
-
-<Card title="POST /api/ocr" icon="text" href="/api/ocr">
-  Extract raw text from images or PDFs without structuring
-</Card>
-
-### Structured Extraction (Legacy)
-
-<Card title="POST /api/ocr-structured" icon="table" href="/api/ocr-structured">
-  Extract structured JSON using MyBillBook schema with reconciliation
-</Card>
-
-### Structured Extraction (v4)
-
-<Card title="POST /api/ocr-structured-v4" icon="layer-group" href="/api/ocr-structured-v4">
-  Advanced India GST schema with comprehensive reconciliation
-</Card>
+<CardGroup cols={2}>
+  <Card title="POST /api/ocr" icon="text" href="/api/ocr">
+    Extract raw text from images or PDFs without structuring
+  </Card>
+  
+  <Card title="POST /api/ocr-structured" icon="table" href="/api/ocr-structured">
+    Extract structured JSON using MyBillBook schema with reconciliation
+  </Card>
+  
+  <Card title="POST /api/ocr-structured-v4" icon="layer-group" href="/api/ocr-structured-v4">
+    Advanced India GST schema with comprehensive reconciliation
+  </Card>
+  
+  <Card title="GET /api/models" icon="microchip" href="/api/models">
+    List available vision-capable OpenRouter models
+  </Card>
+</CardGroup>
 
 ## Input Formats
 
@@ -196,7 +196,7 @@ Rate limits are determined by your OpenRouter plan. The API does not impose addi
   <Card title="V4 Schema" icon="layer-group" href="/api/ocr-structured-v4">
     Advanced India GST extraction
   </Card>
-  <Card title="Integration Guide" icon="code" href="/integration/quickstart">
-    Integrate the API into your app
+  <Card title="Request Formats" icon="code" href="/api/schemas/request-formats">
+    Learn about all supported input formats
   </Card>
 </CardGroup>

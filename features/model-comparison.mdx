@@ -1,0 +1,340 @@
+---
+title: "Model comparison"
+description: "Test multiple AI models side-by-side on the same invoice"
+---
+
+The Model Comparison tool (`/compare`) lets you process the same invoice with multiple vision models simultaneously and compare their accuracy, speed, and output quality.
+
+## Overview
+
+<Frame>
+  <div className="bg-gray-50 dark:bg-gray-900 p-6 rounded-lg border border-gray-200 dark:border-gray-800">
+    <div className="font-semibold text-lg mb-2">Compare Page Features</div>
+    <ul className="space-y-1 text-sm">
+      <li>✓ Run up to 10 models concurrently</li>
+      <li>✓ Real-time progress tracking</li>
+      <li>✓ Accuracy comparison (grand total, GST total, item count)</li>
+      <li>✓ Performance metrics (processing time)</li>
+      <li>✓ Side-by-side result inspection</li>
+      <li>✓ Popular model quick-select</li>
+    </ul>
+  </div>
+</Frame>
+
+## When to Use
+
+<CardGroup cols={2}>
+  <Card title="Model Selection" icon="magnifying-glass">
+    Determine which model works best for your invoice format
+  </Card>
+  <Card title="Accuracy Testing" icon="bullseye">
+    Verify extraction accuracy across different models
+  </Card>
+  <Card title="Performance Benchmarking" icon="gauge">
+    Compare processing speeds for different models
+  </Card>
+  <Card title="Cost Optimization" icon="dollar-sign">
+    Balance accuracy vs cost for your use case
+  </Card>
+</CardGroup>
+
+## Accessing the Tool
+
+Navigate to `/compare` in your browser:
+
+```
+http://localhost:3000/compare
+```
+
+Or from the main page, use the "Compare Models" button (if available in UI).
+
+## How to Use
+
+<Steps>
+  <Step title="Select an Invoice">
+    Upload an invoice image or PDF using the file picker or drag-and-drop.
+    
+    <Note>
+    The same invoice will be sent to all selected models for comparison.
+    </Note>
+  </Step>
+  
+  <Step title="Choose Models to Compare">
+    Select 2-10 models from the list:
+    
+    **Quick Select - Popular Models:**
+    - Google Gemini 2.5 Flash
+    - Google Gemini 2.5 Pro
+    - Google Gemini 2.0 Flash
+    - OpenAI GPT-4o
+    - OpenAI GPT-4o Mini
+    - Anthropic Claude 3.5 Sonnet
+    
+    **Or browse all available vision models:**
+    - Click "Browse all models" to see the full catalog
+    - Filter by provider, context length, or pricing
+  </Step>
+  
+  <Step title="Start Comparison">
+    Click **"Run Comparison"** to process the invoice with all selected models.
+    
+    Models run in parallel, displaying real-time status:
+    - ⏳ Pending (queued)
+    - ⚡ Running (processing)
+    - ✅ Success (completed)
+    - ❌ Error (failed)
+  </Step>
+  
+  <Step title="Review Results">
+    Compare the results side-by-side in a table view:
+    
+    **Metrics Compared:**
+    - **Grand Total Match**: Whether computed total equals printed total
+    - **Item Count**: Number of line items extracted
+    - **GST Total Match**: Whether GST calculation matches printed GST
+    - **Error Absolute**: Difference between computed and printed totals (₹)
+    - **Processing Time**: Time taken to process (milliseconds)
+    
+    Click on any result row to expand and view the full extracted data.
+  </Step>
+</Steps>
+
+## Result Interpretation
+
+### Accuracy Indicators
+
+<Tabs>
+  <Tab title="Perfect Match">
+    ```
+    ✅ Grand Total: Matched
+    ✅ GST Total: Matched
+    Error: ₹0.00
+    ```
+    
+    Model extracted all data correctly and reconciliation succeeded.
+  </Tab>
+  
+  <Tab title="Close Match">
+    ```
+    ⚠️ Grand Total: ₹0.50 off
+    ✅ GST Total: Matched
+    Error: ₹0.50
+    ```
+    
+    Minor rounding difference, still acceptable (within ₹1 tolerance).
+  </Tab>
+  
+  <Tab title="Significant Error">
+    ```
+    ❌ Grand Total: ₹50.00 off
+    ❌ GST Total: Mismatched
+    Error: ₹50.00
+    ```
+    
+    Model failed to extract correctly. Check the raw output for details.
+  </Tab>
+</Tabs>
+
+### Performance Metrics
+
+- **Fast**: < 3 seconds
+- **Medium**: 3-8 seconds
+- **Slow**: > 8 seconds
+
+<Note>
+Processing time includes network latency to OpenRouter. First request may be slower due to cold start.
+</Note>
+
+## Popular Model Combinations
+
+### Budget Testing
+Test cost-effective models:
+- `openai/gpt-4o-mini`
+- `anthropic/claude-3-haiku`
+- `google/gemini-2.0-flash`
+
+### Accuracy Validation
+Compare premium models:
+- `openai/gpt-4o`
+- `anthropic/claude-3.5-sonnet`
+- `google/gemini-2.5-pro`
+
+### Speed vs Quality
+Balance speed and accuracy:
+- `google/gemini-2.0-flash` (fast, accurate)
+- `openai/gpt-4o-mini` (fast, good)
+- `openai/gpt-4o` (slower, best)
+
+## Use Cases
+
+### 1. Choosing Your Production Model
+
+<Accordion title="Scenario: Selecting a model for 1000 invoices/month">
+**Goal:** Balance accuracy and cost
+
+**Steps:**
+1. Upload a representative sample invoice
+2. Compare 5 models across different price points:
+   - `openai/gpt-4o-mini` ($0.001/invoice)
+   - `google/gemini-2.0-flash` ($0.002/invoice)
+   - `openai/gpt-4o` ($0.020/invoice)
+   - `anthropic/claude-3.5-sonnet` ($0.025/invoice)
+3. Review accuracy metrics
+4. Calculate monthly cost: accuracy × 1000 invoices
+5. Choose model with best accuracy/cost ratio
+
+**Example Result:**
+- `gemini-2.0-flash`: 98% accuracy, $2/month → **Selected**
+- `gpt-4o`: 99% accuracy, $20/month → Too expensive for 1% gain
+</Accordion>
+
+### 2. Debugging Extraction Issues
+
+<Accordion title="Scenario: Model extracts incorrect discount amount">
+**Goal:** Find which model handles this invoice type best
+
+**Steps:**
+1. Upload the problematic invoice
+2. Compare 3-4 different models
+3. Inspect which model correctly identifies the discount structure
+4. Use that model for similar invoices going forward
+
+**Insight:**
+Some models better understand regional invoice formats or complex discount structures.
+</Accordion>
+
+### 3. Validating New Model Versions
+
+<Accordion title="Scenario: OpenRouter releases Gemini 2.5 Pro">
+**Goal:** Compare new model vs current production model
+
+**Steps:**
+1. Upload 5 representative invoices
+2. Compare current model vs new model
+3. Check if accuracy improved
+4. Verify processing time is acceptable
+5. Update `OPENROUTER_MODEL` if beneficial
+
+**Decision Criteria:**
+- Accuracy improvement > 2%
+- Processing time increase < 50%
+- Cost increase < 100%
+</Accordion>
+
+## Understanding the Results Table
+
+<ResponseField name="Model" type="string">
+  Model name and ID
+</ResponseField>
+
+<ResponseField name="Status" type="enum">
+  - `pending`: Waiting to start
+  - `running`: Currently processing
+  - `success`: Completed successfully
+  - `error`: Failed with error
+</ResponseField>
+
+<ResponseField name="Time" type="number">
+  Processing duration in milliseconds
+</ResponseField>
+
+<ResponseField name="Items" type="number">
+  Number of line items extracted
+</ResponseField>
+
+<ResponseField name="Grand Total" type="string">
+  Whether computed total matches printed total
+  - ✅ "Matched" - Perfect match
+  - ⚠️ "₹X.XX off" - Close (within tolerance)
+  - ❌ "₹X.XX off" - Significant error
+</ResponseField>
+
+<ResponseField name="GST Total" type="string">
+  Whether GST calculation is correct
+</ResponseField>
+
+<ResponseField name="Error" type="number">
+  Absolute difference in rupees
+</ResponseField>
+
+<ResponseField name="Actions" type="button">
+  - **View Details**: Expand to see full JSON output
+  - **Copy JSON**: Copy extraction result to clipboard
+</ResponseField>
+
+## Technical Details
+
+**Implementation:** `app/compare/page.tsx`
+
+**API Calls:**
+- Fetches available models from `/api/models`
+- Processes invoice via `/api/ocr-structured-v4` for each selected model
+- Runs requests in parallel (concurrent processing)
+
+**State Management:**
+- Real-time status updates for each model
+- Tracks start time and duration
+- Computes accuracy metrics from reconciliation results
+
+**Reconciliation Check:**
+```typescript
+const accuracy = {
+  grandTotalMatched: Math.abs(data.reconciliation.error_absolute) <= 0.05,
+  gstTotalMatched: data.totals.gst_total === data.printed.gst_total,
+  itemCount: data.items.length,
+  errorAbsolute: data.reconciliation.error_absolute
+};
+```
+
+## Tips & Best Practices
+
+<Accordion title="Select 3-5 models per test">
+More than 5 models can be overwhelming to compare. Focus on 3-5 targeted models.
+</Accordion>
+
+<Accordion title="Test with diverse invoices">
+Compare models on multiple invoice types:
+- Simple single-page invoices
+- Multi-page PDFs
+- Scanned images
+- Invoices with complex discounts
+</Accordion>
+
+<Accordion title="Consider context window">
+For multi-page PDFs, choose models with larger context windows (100k+ tokens).
+</Accordion>
+
+<Accordion title="Check for consistency">
+Run the same invoice multiple times to check if results are stable (models should be deterministic).
+</Accordion>
+
+<Accordion title="Document your findings">
+Keep a spreadsheet of model performance on different invoice types to inform future decisions.
+</Accordion>
+
+## Limitations
+
+<Warning>
+**Concurrent Rate Limits**: Running many models simultaneously may hit OpenRouter rate limits. Start with 3-4 models at a time.
+</Warning>
+
+<Note>
+**Cost Consideration**: Each comparison costs the same as processing N separate invoices (N = number of models). Use selectively.
+</Note>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Model Selection Guide" icon="brain" href="/configuration/model-selection">
+    Learn about available models and their characteristics
+  </Card>
+  <Card title="GET /api/models" icon="microchip" href="/api/models">
+    API endpoint for fetching available models
+  </Card>
+  <Card title="OCR Modes" icon="layer-group" href="/features/ocr-modes">
+    Understand different extraction modes
+  </Card>
+  <Card title="Reconciliation Engine" icon="calculator" href="/features/reconciliation-engine">
+    How accuracy is measured
+  </Card>
+</CardGroup>
